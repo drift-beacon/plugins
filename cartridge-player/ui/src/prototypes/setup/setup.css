@@ -1,0 +1,73 @@
+/* Prototype-only stylesheet for the first-run explorations (prototype.html?setup): Tailwind over everything under
+   ui/src, prototypes included, which the shipped stylesheet (../../styles.css) leaves out. */
+@import "tailwindcss";
+@import "../../../../../theme.css";
+@import "../../components/deck.css";
+@plugin '../../hero.ts';
+@custom-variant dark (&:is(.dark *));
+
+@layer base {
+  * {
+    @apply border-divider outline-focus/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* The phone preview: the frame at a phone's width, centred, so a direction is judged at both sizes without resizing
+   the window. */
+.setup-phone .harness-inner {
+  max-width: 390px;
+}
+.setup-phone .harness-frame {
+  height: 780px;
+  border-radius: 28px;
+}
+
+/* The ticket's perforation: two notches bitten out of the card's edges and a dashed tear line between them. */
+.setup-tear {
+  position: relative;
+  border-top: 1px dashed color-mix(in srgb, var(--db-foreground) 22%, transparent);
+}
+.setup-tear::before,
+.setup-tear::after {
+  content: "";
+  position: absolute;
+  top: -9px;
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  background: var(--db-surface);
+}
+.setup-tear::before {
+  left: -9px;
+}
+.setup-tear::after {
+  right: -9px;
+}
+
+/* "Listening": a dot with one ring leaving it, slowly. State indication, so it stops under reduced motion. */
+@keyframes setup-ring {
+  from {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  to {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+.setup-ring {
+  animation: setup-ring 1.8s var(--cp-ease-out) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .setup-ring {
+    animation: none;
+    opacity: 0;
+  }
+}
+:root[data-reduce] .setup-ring {
+  animation: none;
+  opacity: 0;
+}

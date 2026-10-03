@@ -1,0 +1,129 @@
+{
+  "id": "cartridge-player",
+  "name": "Cartridge Player",
+  "icon": "icon.png",
+  "version": "2.0.0",
+  "apiVersion": "0.2",
+  "description": "Slide a labelled NFC cartridge into the player to start its activity, and pull it out to stop",
+  "author": {
+    "name": "@rshallam"
+  },
+  "category": "plugin",
+  "configuration": [],
+  "uses": {
+    "magic-cube": "^1.1.0"
+  },
+  "provides": {
+    "events": {
+      "inserted": {
+        "title": "Cartridge inserted",
+        "description": "A cartridge went into the player and its activity was resolved",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "tag": { "type": "string", "description": "The cartridge's NFC UID, like 04:A2:3B:1C" },
+            "activityId": {
+              "type": ["string", "null"],
+              "description": "The activity it's labelled with; null for an unlabelled cartridge"
+            },
+            "result": {
+              "type": "string",
+              "enum": ["started", "marked", "resumed", "unknown", "orphan", "archived", "error"],
+              "description": "What happened: started or marked its activity, resumed one already live, or nothing because it's unlabelled (unknown), its activity was deleted (orphan) or archived, or starting failed (error)"
+            }
+          },
+          "required": ["tag", "activityId", "result"]
+        }
+      },
+      "ejected": {
+        "title": "Cartridge ejected",
+        "description": "A cartridge came out of the player; the session it started or took over was ended if it was still live",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "tag": { "type": "string", "description": "The cartridge's NFC UID, like 04:A2:3B:1C" },
+            "activityId": {
+              "type": ["string", "null"],
+              "description": "The activity it was in the player as; null for an unlabelled cartridge"
+            },
+            "durationMs": {
+              "type": ["integer", "null"],
+              "minimum": 0,
+              "description": "How long its session ran while it was in, in milliseconds; null when it ran none"
+            }
+          },
+          "required": ["tag", "activityId", "durationMs"]
+        }
+      }
+    },
+    "state": {
+      "player": {
+        "title": "Player",
+        "description": "Whether the player is reachable, and which one: the one whose slot changed last or that was set up last",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "online": {
+              "type": ["boolean", "null"],
+              "description": "Heard from within the last 75 seconds; null when that isn't known: before any player is heard, and while a player hasn't reported yet since the plugin started (for at most 75 seconds)"
+            },
+            "lastHeardAt": {
+              "type": ["string", "null"],
+              "description": "When it was last heard from (ISO 8601), to within 15 minutes while it's online"
+            },
+            "deviceId": {
+              "type": ["string", "null"],
+              "description": "The player's id, like cp-a1b2c3; null before any player is heard"
+            },
+            "name": {
+              "type": ["string", "null"],
+              "description": "The name it shows on its setup network, like Cartridge-A1B2"
+            },
+            "firmware": { "type": ["string", "null"], "description": "Its firmware version, like 2.0.0" },
+            "reader": {
+              "type": ["string", "null"],
+              "enum": ["ok", "fault", null],
+              "description": "The NFC reader's health as the player last reported it; fault means it can't tell whether a cartridge is in"
+            }
+          },
+          "required": ["online", "lastHeardAt", "deviceId", "name", "firmware", "reader"]
+        }
+      },
+      "slot": {
+        "title": "Slot",
+        "description": "What is in the player's slot and what it's doing",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "phase": {
+              "type": "string",
+              "enum": ["empty", "playing", "marked", "ready", "unknown", "orphan", "archived", "error"],
+              "description": "empty; playing (its session is live); marked (a point activity was marked when it went in); ready (labelled, nothing tracking); unknown (unlabelled); orphan or archived (its activity was deleted or archived); error (starting it failed)"
+            },
+            "tag": {
+              "type": ["string", "null"],
+              "description": "The cartridge's NFC UID, like 04:A2:3B:1C; null when the slot is empty"
+            },
+            "activityId": {
+              "type": ["string", "null"],
+              "description": "The activity it's in the player as; null when empty or unlabelled"
+            },
+            "sessionId": {
+              "type": ["string", "null"],
+              "description": "The session it started or adopted, which taking it out ends; null when there is none"
+            },
+            "since": {
+              "type": ["string", "null"],
+              "description": "When it went in (ISO 8601); null when the slot is empty"
+            },
+            "deviceId": {
+              "type": ["string", "null"],
+              "description": "The player it's in; null before any player is heard"
+            }
+          },
+          "required": ["phase", "tag", "activityId", "sessionId", "since", "deviceId"]
+        }
+      }
+    }
+  }
+}

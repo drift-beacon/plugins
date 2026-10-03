@@ -1,0 +1,110 @@
+/* Harness chrome for the hardware simulator: same dark-glass language as the picker, so it never reads as design. */
+.sim-panel {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 2147483646;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 16px;
+  background: rgba(10, 10, 10, 0.82);
+  -webkit-backdrop-filter: blur(12px) saturate(1.4);
+  backdrop-filter: blur(12px) saturate(1.4);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.08) inset,
+    0 8px 24px rgba(0, 0, 0, 0.24),
+    0 2px 6px rgba(0, 0, 0, 0.12);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 12px;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.55);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+.sim-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 4px 4px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.sim-panel-head[aria-expanded="false"] { padding-bottom: 2px; }
+.sim-panel-head:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.4); outline-offset: 2px; border-radius: 6px; }
+
+.sim-panel-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: rgba(255, 255, 255, 0.85);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.sim-panel-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.4);
+  transition: background-color 150ms ease-out;
+}
+
+.sim-panel-dot[data-state="held"] { background: #f59e0b; }
+.sim-panel-dot[data-state="activated"] { background: #22d3ee; }
+
+.sim-panel-row {
+  display: flex;
+  gap: 4px;
+}
+
+.sim-panel-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.75);
+  font: inherit;
+  cursor: pointer;
+  transition: background-color 150ms ease-out, color 150ms ease-out;
+}
+
+.sim-panel-btn:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+.sim-panel-btn:active { transform: scale(0.97); }
+.sim-panel-btn:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.4); outline-offset: 2px; }
+
+.sim-panel-btn kbd {
+  font: inherit;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.sim-panel-face {
+  width: 26px;
+  justify-content: center;
+  padding: 0;
+}
+
+.sim-panel-primary { background: rgba(255, 255, 255, 0.14); color: #fff; }
+
+/* Phone-sized: sit above the picker instead of under it. */
+@media (max-width: 639px) {
+  .sim-panel {
+    right: 12px;
+    bottom: 76px;
+  }
+}

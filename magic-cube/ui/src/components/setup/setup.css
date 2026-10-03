@@ -1,0 +1,182 @@
+.ps-study { --ps-border: color-mix(in srgb, var(--db-foreground) 5.88%, transparent); --ps-muted: var(--db-muted); --ps-ease: cubic-bezier(.23,1,.32,1); }
+.ps-study button { cursor: pointer; }
+.ps-study button:focus-visible { outline: 2px solid var(--db-focus); outline-offset: 3px; }
+.ps-study button:active { transform: scale(.98); }
+.ps-study .ps-tile-select:active { transform: scale(.985); }
+.ps-tray { position: relative; padding: 16px; margin-bottom: 16px; background: var(--db-surface); border: 1px solid color-mix(in srgb, var(--db-foreground) 5.10%, transparent); border-radius: 22px; box-shadow: inset 0 1px 0 color-mix(in srgb, var(--db-foreground) 1.96%, transparent); }
+.ps-section-heading { display: flex; justify-content: space-between; align-items: center; margin: 0 2px 16px; gap: 12px; }
+.ps-section-heading > div { display: flex; align-items: center; gap: 9px; }
+.ps-section-heading strong { font-size: 13px; font-weight: 600; }
+.ps-section-heading > div > span { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--db-muted); }
+.ps-helper { font-size: 11px; color: var(--db-muted); }
+.ps-tray-grid { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 10px; align-items: stretch; }
+.ps-tray-grid > div { min-width: 0; }
+.ps-tray-grid[data-expanded="true"] { max-height: min(420px,50vh); overflow-y: auto; overscroll-behavior: contain; padding: 2px; }
+.ps-tile { min-width: 0; position: relative; height: 122px; border-radius: 12px; isolation: isolate; }
+.ps-tile-select { width: 100%; height: 100%; display: flex; flex-direction: column; position: relative; overflow: hidden; border-radius: 12px; text-align: left; border: 1px solid color-mix(in srgb, var(--db-foreground) 6.27%, transparent); background: linear-gradient(165deg,var(--db-surface-raised),var(--db-surface)); box-shadow: 0 2px 3px #00000030,inset 0 1px 0 color-mix(in srgb, var(--db-foreground) 3.14%, transparent); transition: transform 160ms var(--ps-ease); }
+.ps-tile[data-active="true"] .ps-tile-select { border-color: color-mix(in srgb,var(--preset-color) 65%,var(--db-border)); background: linear-gradient(150deg,color-mix(in srgb,var(--preset-color) 13%,var(--db-surface-raised)),var(--db-surface) 85%); box-shadow: inset 0 0 0 1px color-mix(in srgb,var(--preset-color) 10%,transparent),0 3px 12px #00000020; }
+.ps-grip { display: block; align-self: center; width: 45px; height: 4px; margin-top: 7px; background: repeating-linear-gradient(90deg,color-mix(in srgb, var(--db-foreground) 8.24%, transparent) 0 2px,transparent 2px 5px); border-radius: 2px; }
+.ps-tile-body { display: flex; align-items: center; gap: 9px; min-width: 0; width: 100%; padding: 12px 26px 0 12px; }
+.ps-mode-icon { flex-shrink: 0; color: color-mix(in srgb,var(--preset-color) 45%,var(--db-foreground)); }
+.ps-tile-name { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; font-size: 13px; font-weight: 600; line-height: 17px; letter-spacing: -.15px; }
+.ps-tile-meta { display: flex; width: 100%; justify-content: space-between; gap: 4px; margin-top: auto; padding: 7px 11px 10px; font-size: 9px; color: var(--db-muted); white-space: nowrap; }
+.ps-tile-meta > span { display: inline-flex; align-items: center; gap: 3px; color: var(--db-foreground); font-size: 9px; }
+.ps-face-strip { display: flex; gap: 3px; flex-shrink: 0; }
+.ps-face-strip i { height: 4px; flex: 1; border-radius: 2px; opacity: .8; }
+.ps-tile .ps-face-strip { margin: 0 11px 10px; }
+.ps-tile-actions { position: absolute; top: 22px; right: 4px; opacity: 0; transition: opacity 120ms ease-out; }
+.ps-tile:focus-within .ps-tile-actions,.ps-tile:hover .ps-tile-actions,.ps-tile-actions:has([data-menu-open="true"]) { opacity: 1; }
+.ps-new-tile { min-height: 122px; border-radius: 12px; border: 1px dashed color-mix(in srgb, var(--db-foreground) 12.94%, transparent); display: flex; flex-direction: column; gap: 7px; align-items: center; justify-content: center; padding: 14px; color: var(--db-muted); font-size: 12px; transition: transform 160ms var(--ps-ease); }
+.ps-new-tile > svg { width: 22px; height: 22px; margin-bottom: 2px; padding: 3px; border-radius: 6px; background: color-mix(in srgb, var(--db-foreground) 2.75%, transparent); }
+.ps-new-tile small { max-width: 100px; text-align: center; color: var(--db-muted); font-size: 10px; line-height: 14px; }
+.ps-tray-expand { display: flex; align-items: center; justify-content: center; gap: 7px; margin: 14px auto -3px; min-height: 28px; font-size: 11px; color: var(--db-muted); padding: 0 12px; border-radius: 7px; }
+.ps-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid color-mix(in srgb, var(--db-foreground) 7.84%, transparent); border-radius: 9px; padding: 0 11px; min-height: 34px; color: var(--db-foreground); font-size: 12px; background: color-mix(in srgb, var(--db-foreground) 1.96%, transparent); flex-shrink: 0; transition: transform 160ms var(--ps-ease); white-space: nowrap; }
+.ps-empty-copy { font-size: 12px; color: var(--db-muted); line-height: 1.6; padding: 24px 14px; text-align: center; }
+.ps-form-label { color: var(--db-muted); font-size: 12px; margin-top: 8px; }
+.ps-mode-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ps-mode-choices button { display: flex; flex-direction: column; align-items: flex-start; gap: 7px; border-radius: 12px; border: 1px solid color-mix(in srgb, var(--db-foreground) 7.06%, transparent); padding: 14px; text-align: left; cursor: pointer; }
+.ps-mode-choices button[aria-pressed="true"] { border-color: var(--db-accent); background: color-mix(in srgb, var(--db-accent) 11%, transparent); }
+.ps-mode-choices strong { font-size: 12px; }
+.ps-mode-choices small { font-size: 11px; color: var(--db-muted); line-height: 1.4; }
+
+@media (hover:hover) and (pointer:fine) {
+ .ps-new-tile:hover { color: var(--db-foreground); background: color-mix(in srgb, var(--db-foreground) 3.53%, transparent); border-color: color-mix(in srgb, var(--db-foreground) 16.86%, transparent); }
+ .ps-tray-expand:hover { color: var(--db-foreground); background: color-mix(in srgb, var(--db-foreground) 2.75%, transparent); }
+}
+@media (max-width:899px) { .ps-tray-grid { grid-template-columns: repeat(4,minmax(0,1fr)); } }
+@media (max-width:599px) {
+ .ps-tray-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+ .ps-new-tile { min-height: 44px; flex-direction: row; padding: 10px; grid-column: 1/-1; }
+ .ps-new-tile > svg { margin: 0; }
+}
+@media (hover:none) { .ps-tile-actions { opacity: 1; } }
+@media (prefers-reduced-motion:reduce) {
+ .ps-study *, .ps-study *::before, .ps-study *::after { transition-duration: 0ms !important; animation-duration: 0ms !important; }
+ .ps-study button:active { transform: none !important; }
+}
+/* Shared preset tray and selected mode tabs. */
+.ps-tile { height: 96px; }
+.ps-tile .ps-tile-select,
+.ps-tile[data-active="true"] .ps-tile-select,
+.ps-tile:not([data-active="true"]):hover .ps-tile-select { background: none; border: 0; box-shadow: none; overflow: visible; border-radius: 16px; }
+.ps-tile[data-active="true"] { transform: translateY(-2px); }
+.ps-tile-actions { top: 28px; right: 10px; }
+.ps-new-tile { min-height: 96px; }
+.ps-new-tile small { display: none; }
+.ps-tray { padding: 14px; }
+.ps-section-heading { margin-bottom: 13px; }
+.ps-mode-choices { grid-template-columns: 1fr; gap: 0; }
+.ps-mode-choices button { border: 0; border-bottom: 1px solid color-mix(in srgb, var(--db-foreground) 6.27%, transparent); border-radius: 0; display: grid; grid-template-columns: 20px 1fr; column-gap: 12px; padding: 12px 4px; }
+.ps-mode-choices button small { grid-column: 2; }
+.ps-mode-choices button[aria-pressed="true"] { background: color-mix(in srgb, var(--db-foreground) 1.96%, transparent); }
+/* Size controls against their own column, including when the cube sits alongside it. */
+.preset-editor-config { container: cube-config / inline-size; }
+.preset-editor-heading { align-items: center; margin-bottom: 20px; }
+.preset-editor-heading h2 { font-size: clamp(14px,3.4cqi,20px); line-height: 1.4; }
+.ms-panel { min-width: 0; }
+.ms-mode-nav { display: flex; position: relative; }
+.ms-mode-nav button { position: relative; min-width: 0; color: var(--db-muted); text-align: left; }
+.ms-mode-nav button:focus-visible { outline: 2px solid var(--db-focus); outline-offset: 4px; border-radius: 4px; }
+.ms-mode-line { display: flex; align-items: center; gap: 7px; }
+.ms-mode-line svg { flex-shrink: 0; }
+.ms-mode-nav button[aria-checked="true"] { color: var(--db-foreground); }
+.ms-mode-tabs { gap: clamp(10px,3cqi,20px); border-bottom: 1px solid color-mix(in srgb, var(--db-foreground) 7.06%, transparent); margin-bottom: 22px; }
+.ms-mode-tabs button { padding: 0 0 12px; min-height: 40px; font-size: 12px; font-weight: 550; white-space: nowrap; }
+.ms-mode-indicator { position: absolute; background: var(--db-foreground); pointer-events: none; }
+.ms-mode-tabs .ms-mode-indicator { bottom: -1px; left: 0; right: 0; height: 2px; border-radius: 2px; }
+
+.duel-editor { display: grid; grid-template-columns: minmax(0,1fr) 36px minmax(0,1fr); align-items: stretch; gap: 8px; position: relative; }
+.duel-swap { display: grid; place-items: center; z-index: 1; }
+.duel-swap-button { position: relative; width: 36px; height: 36px; font-size: 12px; }
+.duel-swap-button::after { content: ""; position: absolute; width: 44px; height: 44px; left: 50%; top: 50%; transform: translate(-50%,-50%); border-radius: 50%; }
+.duel-fighter { min-height: 144px; padding: 14px; }
+.duel-fighter-heading { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 5px; width: 100%; }
+.duel-fighter-label { font-size: 10px; line-height: 1.4; letter-spacing: .055em; }
+.duel-fighter-faces { grid-row: 2; }
+.duel-fighter-chevron { grid-column: 2; grid-row: 1 / 3; }
+.duel-fighter-body { display: flex; align-items: center; flex: 1; margin-top: 14px; }
+.duel-fighter-choice { display: flex; align-items: center; gap: 10px; min-width: 0; width: 100%; }
+.duel-fighter-icon { width: clamp(32px,7.5cqi,48px); height: clamp(32px,7.5cqi,48px); border-radius: 12px; }
+.duel-fighter-icon svg { width: 58%; height: 58%; }
+.duel-fighter-name { font-size: clamp(14px,2.8cqi,18px); overflow-wrap: anywhere; }
+.duel-fighter-detail { font-size: clamp(11px,2.2cqi,13px); line-height: 1.4; overflow-wrap: anywhere; }
+@container cube-config (min-width: 620px) {
+  .duel-fighter { padding: 16px; min-height: 152px; }
+  .duel-fighter-heading { grid-template-columns: minmax(0,1fr) auto auto; }
+  .duel-fighter-faces { grid-row: 1; }
+  .duel-fighter-chevron { grid-column: 3; grid-row: 1; }
+  .duel-fighter-label { font-size: 11px; }
+}
+@container cube-config (max-width: 480px) {
+  .preset-editor-heading { column-gap: 8px; margin-bottom: 14px; }
+  .preset-editor-heading h2 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .preset-editor-heading > [role="radiogroup"] { padding: 3px; }
+  .preset-editor-heading > [role="radiogroup"] button { padding: 7px 8px; font-size: 11px; gap: 4px; }
+  .preset-editor-heading > [role="radiogroup"] svg { width: 12px; height: 12px; }
+  .ms-mode-tabs { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr; gap: 8px; margin-bottom: 16px; }
+  .ms-mode-tabs button { font-size: 11px; }
+  .ms-mode-line { gap: 5px; justify-content: center; }
+  .ms-mode-line svg { width: 14px; height: 14px; }
+  .duel-editor { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; }
+  .duel-swap { position: absolute; inset: 0; pointer-events: none; }
+  .duel-swap-button { pointer-events: auto; width: 30px; height: 30px; font-size: 10px; }
+  .duel-fighter { padding: 12px; }
+  .duel-fighter-choice { gap: 8px; }
+}
+@container cube-config (max-width: 380px) {
+  .ms-mode-tabs { grid-template-columns: 1.4fr 1fr 1fr 1fr; gap: 4px; }
+  .ms-mode-tabs button { font-size: 10px; padding-bottom: 10px; }
+  .ms-mode-line { flex-direction: column; gap: 6px; line-height: 1.25; }
+  .ms-mode-line svg { width: 16px; height: 16px; }
+  .duel-fighter { padding: 10px; }
+  .duel-fighter-label { font-size: 9px; letter-spacing: .025em; }
+  .duel-fighter-heading { gap: 4px; }
+  .duel-fighter-chevron { width: 16px; }
+  .duel-fighter-body { align-items: flex-start; margin-top: 12px; }
+  .duel-fighter-choice { flex-direction: column; align-items: flex-start; gap: 9px; }
+  .duel-fighter-icon { width: 32px; height: 32px; border-radius: 9px; }
+}
+@media (hover:hover) and (pointer:fine) {
+  .ms-mode-nav button:hover { color: var(--db-foreground); }
+}
+@media (max-width:599px) {
+  .ps-new-tile { min-height: 42px; }
+  .ps-tray { padding: 12px; }
+  .ps-tile-actions { opacity: 1; right: 5px; }
+  .preset-editor-config { padding: 16px; }
+}
+
+/* Phone: the cube pinned on top, the options scrolling under it, presets in a sheet. */
+.phone-view { min-height: 100dvh; -webkit-tap-highlight-color: transparent; }
+.phone-stage { position: sticky; top: 0; z-index: 3; overflow: hidden; border-radius: 0 0 24px 24px; background: var(--db-surface); box-shadow: 0 1px 0 color-mix(in srgb, var(--db-foreground) 7%, transparent), 0 12px 24px -12px #000000a0; }
+.phone-bar { display: flex; align-items: center; gap: 8px; height: 56px; padding: 0 12px 0 8px; }
+.phone-switcher { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; height: 40px; padding: 0 8px; border-radius: 12px; font-size: 15px; font-weight: 700; text-align: left; }
+.phone-switch { padding: 3px; }
+.phone-switch button { padding: 7px 9px; font-size: 12px; gap: 4px; }
+.phone-switch svg { width: 12px; height: 12px; }
+.phone-cube { position: relative; isolation: isolate; height: clamp(230px,40dvh,330px); }
+.phone-cube[data-live="true"] { height: calc(100dvh - 56px); }
+/* The editors layer their own cards; keep that below the sheet. */
+.phone-config.preset-editor-config { position: relative; z-index: 0; isolation: isolate; padding: 16px 16px 48px; }
+.phone-config .ms-mode-tabs { margin-bottom: 14px; }
+.phone-icon-button { display: grid; place-items: center; flex-shrink: 0; width: 40px; height: 40px; border-radius: 12px; color: var(--db-muted); }
+/* Under HeroUI's own overlays (z-10), so a preset's menu opens over the sheet it lives in. */
+.phone-scrim { position: fixed; inset: 0; z-index: 6; background: #00000080; }
+.phone-sheet { position: fixed; inset-inline: 0; bottom: 0; z-index: 7; display: flex; flex-direction: column; max-height: 78dvh; border-radius: 24px 24px 0 0; background: var(--db-surface); box-shadow: 0 -1px 0 color-mix(in srgb, var(--db-foreground) 8%, transparent), 0 -16px 40px #00000066; }
+.phone-sheet-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 10px 6px 18px; font-size: 15px; }
+.phone-sheet-body { overflow-y: auto; overscroll-behavior: contain; padding: 4px 12px 36px; }
+.phone-presets { display: flex; flex-direction: column; gap: 6px; }
+.phone-presets .ps-new-tile { margin-top: 6px; min-height: 48px; }
+.phone-preset { display: flex; align-items: center; gap: 2px; padding-right: 8px; border-radius: 14px; border: 1px solid transparent; }
+.phone-preset[data-active="true"] { background: color-mix(in srgb, var(--db-foreground) 5%, transparent); border-color: color-mix(in srgb, var(--db-foreground) 9%, transparent); }
+.phone-preset > button:first-child { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; min-height: 60px; padding: 8px 6px 8px 12px; text-align: left; }
+.phone-preset-icon { display: grid; place-items: center; flex-shrink: 0; width: 36px; height: 36px; border-radius: 10px; background: color-mix(in srgb, var(--db-foreground) 6%, transparent); color: var(--db-muted); }
+.phone-preset[data-active="true"] .phone-preset-icon { background: var(--db-foreground); color: var(--db-background); }
+.phone-preset-name { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 14px; font-weight: 600; line-height: 18px; }
+.phone-preset-meta { display: block; margin-top: 2px; font-size: 12px; color: var(--db-muted); }
+.phone-preset-faces { display: flex; gap: 3px; flex-shrink: 0; }
+.phone-preset-faces i { width: 6px; height: 6px; border-radius: 3px; }
+.phone-face-dock { position: fixed; inset: 0 0 16px; z-index: 8; pointer-events: none; }
+.phone-face-dock > div { pointer-events: auto; }
+/* The editor's line back to its face is drawn in the stage's coordinates, which the dock doesn't share. */
+.phone-face-dock > svg { display: none; }

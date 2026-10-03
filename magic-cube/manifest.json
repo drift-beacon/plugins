@@ -1,0 +1,253 @@
+{
+  "id": "magic-cube",
+  "name": "Magic Cube",
+  "icon": "icon.png",
+  "version": "1.3.0",
+  "apiVersion": "0.2",
+  "description": "Use Aqrara Magic Cube to roll activities",
+  "author": {
+    "name": "@rshallam"
+  },
+  "category": "plugin",
+  "configuration": [
+    {
+      "name": "mqttTopic",
+      "type": "string",
+      "title": "MQTT Topic",
+      "description": "Zigbee2MQTT topic for cube events (e.g., zigbee2mqtt/MagicCube)",
+      "required": true,
+      "default": ""
+    }
+  ],
+  "uses": {
+    "nanoleaf": "^0.3.0"
+  },
+  "provides": {
+    "commands": {
+      "selectPreset": {
+        "title": "Select preset",
+        "description": "Switch the cube to a saved preset, by name or id, or clear the active preset with null",
+        "input": {
+          "type": "object",
+          "properties": {
+            "preset": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "A preset's name or id; null clears the active preset"
+            }
+          },
+          "required": [
+            "preset"
+          ]
+        },
+        "output": {
+          "type": "object",
+          "properties": {
+            "activePresetId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "activePresetId",
+            "name"
+          ]
+        }
+      }
+    },
+    "events": {
+      "rolled": {
+        "title": "Rolled",
+        "description": "The cube was set down after a shake and a face picked",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "side": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 6,
+              "description": "The face that landed up"
+            },
+            "activityId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "What the face picked; null when the face is empty"
+            },
+            "activityName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "startMode": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "auto",
+                "manual",
+                null
+              ],
+              "description": "auto: tracked on landing; null: waiting for a manual start"
+            },
+            "at": {
+              "type": "string",
+              "description": "When it landed (ISO 8601)"
+            }
+          },
+          "required": [
+            "side",
+            "activityId",
+            "activityName",
+            "startMode",
+            "at"
+          ]
+        }
+      }
+    },
+    "state": {
+      "presets": {
+        "title": "Presets",
+        "description": "The saved presets, in order; select one with selectPreset",
+        "schema": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "mode": {
+                "type": "string",
+                "enum": [
+                  "duel",
+                  "shortlist",
+                  "roulette",
+                  "manual"
+                ],
+                "description": "How the preset maps faces; presets saved before modes existed are manual"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "mode"
+            ]
+          }
+        }
+      },
+      "activePreset": {
+        "title": "Active preset",
+        "description": "The loaded preset, or null for an unsaved setup",
+        "schema": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "mode": {
+              "type": "string",
+              "enum": [
+                "duel",
+                "shortlist",
+                "roulette",
+                "manual"
+              ],
+              "description": "How the preset maps faces; presets saved before modes existed are manual"
+            }
+          },
+          "required": [
+            "id",
+            "name",
+            "mode"
+          ]
+        }
+      },
+      "cube": {
+        "title": "Cube",
+        "description": "idle, held (picked up) or activated (shaken, waiting to be set down)",
+        "schema": {
+          "type": "string",
+          "enum": [
+            "idle",
+            "held",
+            "activated"
+          ]
+        }
+      },
+      "lastRoll": {
+        "title": "Last roll",
+        "description": "The latest roll; absent before the first",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "side": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 6,
+              "description": "The face that landed up"
+            },
+            "activityId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "What the face picked; null when the face is empty"
+            },
+            "activityName": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "startMode": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "auto",
+                "manual",
+                null
+              ],
+              "description": "auto: tracked on landing; null: waiting for a manual start"
+            },
+            "at": {
+              "type": "string",
+              "description": "When it landed (ISO 8601)"
+            }
+          },
+          "required": [
+            "side",
+            "activityId",
+            "activityName",
+            "startMode",
+            "at"
+          ]
+        }
+      }
+    }
+  }
+}

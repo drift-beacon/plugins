@@ -1,0 +1,16 @@
+@import "tailwindcss";
+@import "../../../theme.css";
+@import "./components/deck.css";
+@plugin './hero.ts';
+/* The prototypes are dev-only and never built; their classes stay out of the shipped stylesheet. */
+@source not "./prototypes";
+@custom-variant dark (&:is(.dark *));
+
+@layer base {
+  * {
+    @apply border-divider outline-focus/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}

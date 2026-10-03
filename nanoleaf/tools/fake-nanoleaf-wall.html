@@ -1,0 +1,492 @@
+<!doctype html>
+<!-- The emulator's virtual wall (tools/fake-nanoleaf.mjs serves it): the panels in real geometry with their light,
+     the controller's state, and the buttons a person would use. Self-contained: no CDN, no build step. -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Virtual Nanoleaf</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #060608;
+        --surface: #111115;
+        --ring: #232329;
+        --ring-hover: #34343c;
+        --text: #ececef;
+        --dim: #8a8a94;
+        --faint: #55555e;
+        --panel: #101014;
+        --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+      }
+      * {
+        box-sizing: border-box;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
+        background: radial-gradient(120% 80% at 50% 0%, #14141a 0%, var(--bg) 62%);
+        color: var(--text);
+        font: 13px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      header {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px 20px;
+        padding: 14px 18px 8px;
+      }
+      .name {
+        font-size: 15px;
+        font-weight: 600;
+      }
+      .meta {
+        color: var(--dim);
+        font-size: 12px;
+      }
+      .pills,
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .actions {
+        margin-left: auto;
+      }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 3px 10px;
+        border-radius: 999px;
+        background: var(--surface);
+        box-shadow: inset 0 0 0 1px var(--ring);
+        color: var(--dim);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+      }
+      .pill b {
+        color: var(--text);
+        font-weight: 500;
+      }
+      .pill.warn b {
+        color: #fca5a5;
+      }
+      .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: #3f3f46;
+      }
+      .dot.on {
+        background: #4ade80;
+        box-shadow: 0 0 8px #4ade8099;
+      }
+      button,
+      select {
+        appearance: none;
+        font: inherit;
+        color: var(--text);
+        background-color: var(--surface);
+        border: 0;
+        box-shadow: inset 0 0 0 1px var(--ring);
+        border-radius: 12px;
+        padding: 7px 12px;
+        cursor: pointer;
+        transition:
+          transform 0.12s var(--ease-out),
+          box-shadow 0.15s var(--ease-out),
+          background-color 0.15s var(--ease-out);
+      }
+      select {
+        padding-right: 30px;
+        background-image:
+          linear-gradient(45deg, transparent 50%, var(--dim) 50%),
+          linear-gradient(135deg, var(--dim) 50%, transparent 50%);
+        background-position:
+          calc(100% - 16px) 55%,
+          calc(100% - 11px) 55%;
+        background-size: 5px 5px;
+        background-repeat: no-repeat;
+      }
+      @media (hover: hover) and (pointer: fine) {
+        button:hover,
+        select:hover {
+          box-shadow: inset 0 0 0 1px var(--ring-hover);
+          background-color: #17171c;
+        }
+      }
+      button:active {
+        transform: scale(0.97);
+      }
+      button.live {
+        box-shadow: inset 0 0 0 1px #38bdf8aa;
+        color: #bae6fd;
+        background-color: #0b1a24;
+      }
+      button:disabled {
+        cursor: default;
+        opacity: 0.6;
+      }
+      main {
+        position: relative;
+        flex: 1;
+        min-height: 300px;
+        display: grid;
+        place-items: center;
+        padding: 8px 18px 0;
+      }
+      svg {
+        width: 100%;
+        height: 100%;
+        max-height: calc(100vh - 140px);
+        overflow: visible;
+      }
+      .base {
+        fill: var(--panel);
+        stroke: var(--panel);
+        stroke-width: 6;
+        stroke-linejoin: round;
+      }
+      .lit {
+        stroke-width: 6;
+        stroke-linejoin: round;
+        cursor: pointer;
+      }
+      .ghost {
+        fill: none;
+        stroke: #3a3a44;
+        stroke-width: 2;
+        stroke-dasharray: 7 6;
+      }
+      .ctrl {
+        fill: #17171c;
+        stroke: #3a3a44;
+        stroke-width: 2;
+      }
+      .led {
+        fill: #3f3f46;
+      }
+      .led.on {
+        fill: #4ade80;
+      }
+      .led.pairing {
+        fill: #38bdf8;
+        animation: blink 0.8s steps(2, jump-none) infinite;
+      }
+      .ripple {
+        fill: none;
+        stroke: #fff;
+        stroke-width: 4;
+        stroke-linejoin: round;
+        pointer-events: none;
+        animation: ripple 0.45s var(--ease-out) forwards;
+      }
+      @keyframes blink {
+        50% {
+          opacity: 0.15;
+        }
+      }
+      @keyframes ripple {
+        from {
+          opacity: 0.8;
+        }
+        to {
+          opacity: 0;
+        }
+      }
+      .banner {
+        position: absolute;
+        top: 8px;
+        left: 50%;
+        transform: translateX(-50%) translateY(-4px);
+        padding: 5px 12px;
+        border-radius: 999px;
+        background: #2a1215;
+        color: #fca5a5;
+        box-shadow: inset 0 0 0 1px #7f1d1d;
+        opacity: 0;
+        pointer-events: none;
+        transition:
+          opacity 0.2s var(--ease-out),
+          transform 0.2s var(--ease-out);
+      }
+      .banner.show {
+        opacity: 1;
+        transform: translateX(-50%);
+      }
+      footer {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        gap: 6px 16px;
+        padding: 10px 18px 14px;
+        color: var(--faint);
+        font-size: 12px;
+        font-variant-numeric: tabular-nums;
+      }
+      kbd {
+        font: inherit;
+        padding: 0 5px;
+        border-radius: 5px;
+        box-shadow: inset 0 0 0 1px var(--ring);
+        color: var(--dim);
+      }
+      @media (max-width: 720px) {
+        .actions {
+          margin-left: 0;
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation: none !important;
+          transition: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div>
+        <div class="name" id="name">Nanoleaf</div>
+        <div class="meta" id="meta">Connecting…</div>
+      </div>
+      <div class="pills">
+        <span class="pill"><span class="dot" id="power-dot"></span><b id="power">–</b></span>
+        <span class="pill">Brightness <b id="brightness">–</b></span>
+        <span class="pill">Effect <b id="effect">–</b></span>
+        <span class="pill">Stream <b id="fps">–</b></span>
+        <span class="pill warn" id="dropped-pill" hidden>Dropped <b id="dropped">0</b></span>
+      </div>
+      <div class="actions">
+        <button id="pair" title="Opens the pairing window for 30 s (P)">Hold power button</button>
+        <button id="power-button" title="Toggles the wall (O)">Power</button>
+        <select id="pick" aria-label="Nanoleaf app: pick effect" title="Leaves any stream, like the Nanoleaf app (E)">
+          <option value="">Nanoleaf app: pick effect</option>
+        </select>
+        <button id="rearrange" title="Sends a new layout (R)">Rearrange</button>
+      </div>
+    </header>
+    <main>
+      <svg id="wall" role="img" aria-label="The virtual wall"></svg>
+      <div class="banner" id="banner">Emulator stopped · reconnecting</div>
+    </main>
+    <footer>
+      <span>
+        Click a panel to tap it, double-click to double tap, <kbd>←</kbd><kbd>↑</kbd><kbd>→</kbd><kbd>↓</kbd> swipe.
+      </span>
+      <span id="endpoints"></span>
+    </footer>
+    <script>
+      const NS = "http://www.w3.org/2000/svg";
+      const $ = (id) => document.getElementById(id);
+      const svg = $("wall");
+      let layout = null;
+      let status = null;
+      let lights = [];
+      let led = null;
+      let floor = null;
+      let pending = null;
+
+      function el(name, attrs, parent) {
+        const node = document.createElementNS(NS, name);
+        for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, String(value));
+        if (parent) parent.append(node);
+        return node;
+      }
+
+      const points = (list) => list.map(([x, y]) => `${x},${y}`).join(" ");
+
+      /** Shrinks a regular polygon towards its centre so every edge moves in by `by` units. */
+      function inset(list, [cx, cy], inradius, by) {
+        const k = Math.max(inradius - by, 1) / inradius;
+        return list.map(([x, y]) => [cx + (x - cx) * k, cy + (y - cy) * k]);
+      }
+
+      function drawLayout(next) {
+        layout = next;
+        lights = [];
+        led = null;
+        svg.replaceChildren();
+        const [x, y, w, h] = next.box;
+        const pad = 48;
+        svg.setAttribute("viewBox", `${x - pad} ${y - pad} ${w + 2 * pad} ${h + 2 * pad + 36}`);
+        const defs = el("defs", {}, svg);
+        const bloom = el("filter", { id: "bloom", x: "-50%", y: "-50%", width: "200%", height: "200%" }, defs);
+        el("feGaussianBlur", { stdDeviation: 16 }, bloom);
+        const haze = el("filter", { id: "haze", x: "-50%", y: "-200%", width: "200%", height: "500%" }, defs);
+        el("feGaussianBlur", { stdDeviation: 34 }, haze);
+        const ground = { cx: x + w / 2, cy: y + h + 40, rx: w * 0.5, ry: 22, filter: "url(#haze)", opacity: 0 };
+        floor = el("ellipse", ground, svg);
+        const glowLayer = el("g", { filter: "url(#bloom)" }, svg);
+        const baseLayer = el("g", {}, svg);
+        const litLayer = el("g", {}, svg);
+        for (const panel of next.panels) {
+          const glow = el("polygon", { points: points(panel.pts), opacity: 0 }, glowLayer);
+          const shape = points(inset(panel.pts, panel.c, panel.r, 5));
+          el("polygon", { class: "base", points: shape }, baseLayer);
+          const dark = { "fill-opacity": 0, "stroke-opacity": 0 };
+          const lit = el("polygon", { class: "lit", points: shape, ...dark, "data-id": panel.id }, litLayer);
+          el("title", {}, lit).textContent = `${panel.name} ${panel.id}`;
+          lights.push({ glow, lit });
+        }
+        for (const other of next.others) {
+          const [cx, cy] = other.c;
+          if (other.role === "controller") {
+            const group = el("g", {}, svg);
+            el("rect", { class: "ctrl", x: cx - 15, y: cy - 9, width: 30, height: 18, rx: 7 }, group);
+            led = el("circle", { class: "led", cx, cy, r: 3.5 }, group);
+            el("title", {}, group).textContent = "Controller";
+          } else if (other.pts) {
+            el("polygon", { class: "ghost", points: points(other.pts) }, svg);
+          } else {
+            el("circle", { class: "ghost", cx, cy, r: 10 }, svg);
+          }
+        }
+        if (status) showStatus(status);
+      }
+
+      function paint(frame) {
+        if (!layout || frame.v !== layout.v) return;
+        const colours = frame.c.split(",");
+        let r = 0;
+        let g = 0;
+        let b = 0;
+        colours.forEach((hex, i) => {
+          const panel = lights[i];
+          if (!panel) return;
+          const rgb = [0, 2, 4].map((at) => parseInt(hex.slice(at, at + 2), 16) || 0);
+          r += rgb[0];
+          g += rgb[1];
+          b += rgb[2];
+          const max = Math.max(...rgb);
+          const alpha = (max / 255).toFixed(3);
+          if (max > 0) {
+            const full = `rgb(${rgb.map((c) => Math.round((c * 255) / max)).join(",")})`;
+            for (const node of [panel.lit, panel.glow]) {
+              node.setAttribute("fill", full);
+              node.setAttribute("stroke", full);
+            }
+          }
+          panel.lit.setAttribute("fill-opacity", alpha);
+          panel.lit.setAttribute("stroke-opacity", alpha);
+          panel.glow.setAttribute("opacity", ((max / 255) * 0.85).toFixed(3));
+        });
+        const n = Math.max(colours.length, 1);
+        const max = Math.max(r, g, b) / n;
+        if (floor && max > 0) {
+          floor.setAttribute("fill", `rgb(${[r, g, b].map((c) => Math.round((c / n) * (255 / max))).join(",")})`);
+        }
+        floor?.setAttribute("opacity", ((max / 255) * 0.45).toFixed(3));
+      }
+
+      function showStatus(next) {
+        status = next;
+        $("name").textContent = next.name;
+        const firmware = next.firmware ? ` · firmware ${next.firmware}` : "";
+        $("meta").textContent = `${next.model}${firmware} · ${next.layout} · ${next.panels} panels`;
+        $("power").textContent = next.on ? "On" : "Off";
+        $("power-dot").classList.toggle("on", next.on);
+        $("brightness").textContent = `${next.brightness}%`;
+        $("effect").textContent = next.effect;
+        const streaming = next.effect === "*ExtControl*";
+        $("fps").textContent = streaming ? `${next.fps.toFixed(1)} fps · ${next.frames.toLocaleString()}` : "idle";
+        $("dropped-pill").hidden = next.dropped === 0;
+        $("dropped").textContent = next.dropped.toLocaleString();
+        const pair = $("pair");
+        const open = next.pairing === "open";
+        pair.disabled = open;
+        pair.classList.toggle("live", open || next.pairingLeft > 0);
+        pair.textContent = open
+          ? "Pairing always open"
+          : next.pairingLeft > 0
+            ? `Pairing open · ${next.pairingLeft} s`
+            : "Hold power button";
+        const pick = $("pick");
+        const names = [...pick.options].slice(1).map((option) => option.value);
+        if (names.join("\n") !== next.effects.join("\n")) {
+          pick.replaceChildren(pick.options[0]);
+          for (const name of next.effects) pick.append(new Option(name, name));
+        }
+        $("rearrange").textContent = `Rearrange → ${next.next}`;
+        if (led) {
+          led.classList.toggle("on", next.on);
+          led.classList.toggle("pairing", !open && next.pairingLeft > 0);
+        }
+        const tokens = `${next.tokens} token${next.tokens === 1 ? "" : "s"}`;
+        const streams = `${next.streams} event stream${next.streams === 1 ? "" : "s"}`;
+        $("endpoints").textContent = `REST ${next.rest} · UDP ${next.udp} · ${tokens} · ${streams}`;
+      }
+
+      function post(path, body = {}) {
+        const headers = { "Content-Type": "application/json" };
+        return fetch(path, { method: "POST", headers, body: JSON.stringify(body) }).catch(() => {});
+      }
+
+      const touch = (panelId, gesture) => post("touch", { panelId, gesture });
+
+      function ripple(target) {
+        const ring = el("polygon", { class: "ripple", points: target.getAttribute("points") }, svg);
+        ring.addEventListener("animationend", () => ring.remove());
+        setTimeout(() => ring.remove(), 600);
+      }
+
+      svg.addEventListener("click", (event) => {
+        const target = event.target.closest("[data-id]");
+        if (!target) return;
+        const id = Number(target.dataset.id);
+        ripple(target);
+        if (pending && pending.id === id) {
+          clearTimeout(pending.timer);
+          pending = null;
+          touch(id, 1);
+          return;
+        }
+        if (pending) {
+          clearTimeout(pending.timer);
+          touch(pending.id, 0);
+        }
+        pending = { id, timer: setTimeout(() => ((pending = null), touch(id, 0)), 250) };
+      });
+
+      $("pair").addEventListener("click", () => post("pair"));
+      $("power-button").addEventListener("click", () => post("power"));
+      $("rearrange").addEventListener("click", () => post("rearrange"));
+      $("pick").addEventListener("change", (event) => {
+        const name = event.target.value;
+        event.target.selectedIndex = 0;
+        if (name) post("effect", { name });
+      });
+
+      const SWIPES = { ArrowUp: 2, ArrowDown: 3, ArrowLeft: 4, ArrowRight: 5 };
+      const KEYS = { p: "pair", o: "power", e: "effect", r: "rearrange" };
+      document.addEventListener("keydown", (event) => {
+        if (event.metaKey || event.ctrlKey || event.altKey || event.target instanceof HTMLSelectElement) return;
+        if (event.key in SWIPES) {
+          event.preventDefault();
+          touch(-1, SWIPES[event.key]);
+        } else if (event.key.toLowerCase() in KEYS) {
+          post(KEYS[event.key.toLowerCase()]);
+        }
+      });
+
+      const source = new EventSource("stream");
+      source.addEventListener("layout", (event) => drawLayout(JSON.parse(event.data)));
+      source.addEventListener("status", (event) => showStatus(JSON.parse(event.data)));
+      source.addEventListener("frame", (event) => paint(JSON.parse(event.data)));
+      source.addEventListener("open", () => $("banner").classList.remove("show"));
+      source.addEventListener("error", () => $("banner").classList.add("show"));
+    </script>
+  </body>
+</html>

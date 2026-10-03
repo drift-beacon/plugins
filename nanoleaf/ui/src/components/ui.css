@@ -1,0 +1,86 @@
+/*
+ * The few predetermined loops the shell uses. Every loop means something is live or waiting (a search listening, a
+ * pairing window being waited for) and stops under reduced motion; one-off moments are driven by Motion in the
+ * components. Anything that mirrors the wall's light (the Now card's bar and pulse dot) runs on the drawing's clock
+ * instead (bar-light.ts), so it keeps step with the panels.
+ */
+:root {
+  --nl-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --nl-ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+}
+
+/* Loading: appears only after a beat, so a quick connection never flashes it. */
+@keyframes nl-appear {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.nl-appear {
+  animation: nl-appear 300ms var(--nl-ease-out) 400ms both;
+}
+
+/* Discovery: a sweep turns while the server listens for controllers. Constant motion, so linear. */
+@keyframes nl-sweep {
+  to { transform: rotate(360deg); }
+}
+.nl-sweep {
+  transform-origin: 50% 50%;
+  animation: nl-sweep 2400ms linear infinite;
+}
+
+/* Discovery: echoes leave the centre while listening. */
+@keyframes nl-echo {
+  from { transform: scale(0.3); opacity: 0.55; }
+  to { transform: scale(1); opacity: 0; }
+}
+.nl-echo {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: nl-echo 2400ms var(--nl-ease-out) infinite;
+}
+.nl-echo:nth-of-type(2) { animation-delay: 800ms; }
+.nl-echo:nth-of-type(3) { animation-delay: 1600ms; }
+
+/*
+ * Pairing: the ring around the power button fills over the 6 s hold (time made visible, so linear), the panels
+ * flash as the pairing window opens, then it rests and shows the hold again.
+ */
+@keyframes nl-hold {
+  0% { stroke-dashoffset: var(--nl-ring); opacity: 1; }
+  78% { stroke-dashoffset: 0; opacity: 1; }
+  88% { stroke-dashoffset: 0; opacity: 1; }
+  100% { stroke-dashoffset: 0; opacity: 0; }
+}
+.nl-hold {
+  animation: nl-hold 7700ms linear infinite;
+}
+@keyframes nl-flash {
+  0%, 77% { opacity: 0.08; }
+  80% { opacity: 0.9; }
+  84% { opacity: 0.25; }
+  87% { opacity: 0.9; }
+  100% { opacity: 0.08; }
+}
+.nl-flash {
+  animation: nl-flash 7700ms ease-out infinite;
+}
+/* The finger presses in for the length of the hold. */
+@keyframes nl-press {
+  0%, 2% { transform: translateY(-6px); opacity: 0; }
+  6%, 78% { transform: translateY(0); opacity: 1; }
+  86%, 100% { transform: translateY(-6px); opacity: 0; }
+}
+.nl-press {
+  animation: nl-press 7700ms var(--nl-ease-out) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nl-appear { animation-duration: 1ms; }
+  .nl-sweep,
+  .nl-echo,
+  .nl-press {
+    animation: none;
+  }
+  .nl-echo { opacity: 0; }
+  .nl-hold { animation: none; stroke-dashoffset: 0; }
+  .nl-flash { animation: none; opacity: 0.3; }
+}

@@ -1,0 +1,293 @@
+{
+  "name": "Shapes Sunrise",
+  "serialNo": "S19124C0BIG",
+  "manufacturer": "Nanoleaf",
+  "firmwareVersion": "9.2.4",
+  "hardwareVersion": "2.3-0",
+  "model": "NL42",
+  "discovery": {},
+  "effects": {
+    "effectsList": [
+      "Beatdrop",
+      "Blaze",
+      "Cocoa Beach",
+      "Cotton Candy",
+      "Morning Sky",
+      "Northern Lights",
+      "Starlight"
+    ],
+    "select": "Northern Lights"
+  },
+  "firmwareUpgrade": {},
+  "panelLayout": {
+    "globalOrientation": {
+      "value": 0,
+      "max": 360,
+      "min": 0
+    },
+    "layout": {
+      "numPanels": 33,
+      "sideLength": 0,
+      "positionData": [
+        {
+          "panelId": 6934,
+          "x": 519,
+          "y": 349,
+          "o": 300,
+          "shapeType": 7
+        },
+        {
+          "panelId": 5371,
+          "x": 620,
+          "y": 407,
+          "o": 300,
+          "shapeType": 7
+        },
+        {
+          "panelId": 41455,
+          "x": 519,
+          "y": 466,
+          "o": 180,
+          "shapeType": 7
+        },
+        {
+          "panelId": 20550,
+          "x": 419,
+          "y": 407,
+          "o": 240,
+          "shapeType": 7
+        },
+        {
+          "panelId": 21734,
+          "x": 419,
+          "y": 291,
+          "o": 240,
+          "shapeType": 7
+        },
+        {
+          "panelId": 14713,
+          "x": 519,
+          "y": 233,
+          "o": 60,
+          "shapeType": 7
+        },
+        {
+          "panelId": 33771,
+          "x": 620,
+          "y": 291,
+          "o": 60,
+          "shapeType": 7
+        },
+        {
+          "panelId": 62019,
+          "x": 553,
+          "y": 562,
+          "o": 120,
+          "shapeType": 8
+        },
+        {
+          "panelId": 53866,
+          "x": 720,
+          "y": 427,
+          "o": 300,
+          "shapeType": 8
+        },
+        {
+          "panelId": 1571,
+          "x": 720,
+          "y": 272,
+          "o": 240,
+          "shapeType": 8
+        },
+        {
+          "panelId": 46355,
+          "x": 318,
+          "y": 272,
+          "o": 240,
+          "shapeType": 8
+        },
+        {
+          "panelId": 14358,
+          "x": 352,
+          "y": 485,
+          "o": 180,
+          "shapeType": 8
+        },
+        {
+          "panelId": 6519,
+          "x": 151,
+          "y": 98,
+          "o": 0,
+          "shapeType": 8
+        },
+        {
+          "panelId": 64069,
+          "x": 218,
+          "y": 137,
+          "o": 300,
+          "shapeType": 8
+        },
+        {
+          "panelId": 54724,
+          "x": 285,
+          "y": 98,
+          "o": 0,
+          "shapeType": 8
+        },
+        {
+          "panelId": 31223,
+          "x": 352,
+          "y": 137,
+          "o": 180,
+          "shapeType": 8
+        },
+        {
+          "panelId": 48444,
+          "x": 419,
+          "y": 98,
+          "o": 240,
+          "shapeType": 8
+        },
+        {
+          "panelId": 4540,
+          "x": 486,
+          "y": 137,
+          "o": 60,
+          "shapeType": 8
+        },
+        {
+          "panelId": 29951,
+          "x": 553,
+          "y": 98,
+          "o": 240,
+          "shapeType": 8
+        },
+        {
+          "panelId": 42933,
+          "x": 50,
+          "y": 117,
+          "o": 300,
+          "shapeType": 7
+        },
+        {
+          "panelId": 64077,
+          "x": 620,
+          "y": 175,
+          "o": 240,
+          "shapeType": 7
+        },
+        {
+          "panelId": 14631,
+          "x": 586,
+          "y": 620,
+          "o": 60,
+          "shapeType": 9
+        },
+        {
+          "panelId": 55140,
+          "x": 586,
+          "y": 659,
+          "o": 120,
+          "shapeType": 9
+        },
+        {
+          "panelId": 15731,
+          "x": 787,
+          "y": 427,
+          "o": 120,
+          "shapeType": 9
+        },
+        {
+          "panelId": 13209,
+          "x": 821,
+          "y": 446,
+          "o": 300,
+          "shapeType": 9
+        },
+        {
+          "panelId": 51119,
+          "x": 787,
+          "y": 272,
+          "o": 180,
+          "shapeType": 9
+        },
+        {
+          "panelId": 11060,
+          "x": 318,
+          "y": 543,
+          "o": 0,
+          "shapeType": 9
+        },
+        {
+          "panelId": 46778,
+          "x": 285,
+          "y": 562,
+          "o": 60,
+          "shapeType": 9
+        },
+        {
+          "panelId": 24765,
+          "x": 50,
+          "y": 195,
+          "o": 0,
+          "shapeType": 9
+        },
+        {
+          "panelId": 33555,
+          "x": 84,
+          "y": 214,
+          "o": 60,
+          "shapeType": 9
+        },
+        {
+          "panelId": 61545,
+          "x": 620,
+          "y": 98,
+          "o": 180,
+          "shapeType": 9
+        },
+        {
+          "panelId": 49965,
+          "x": 586,
+          "y": 40,
+          "o": 60,
+          "shapeType": 9
+        },
+        {
+          "panelId": 0,
+          "x": 117,
+          "y": 49,
+          "o": 180,
+          "shapeType": 12
+        }
+      ]
+    }
+  },
+  "schedules": {},
+  "state": {
+    "brightness": {
+      "value": 64,
+      "max": 100,
+      "min": 0
+    },
+    "colorMode": "effect",
+    "ct": {
+      "value": 4000,
+      "max": 6500,
+      "min": 1200
+    },
+    "hue": {
+      "value": 0,
+      "max": 360,
+      "min": 0
+    },
+    "on": {
+      "value": true
+    },
+    "sat": {
+      "value": 0,
+      "max": 100,
+      "min": 0
+    }
+  }
+}

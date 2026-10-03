@@ -1,0 +1,145 @@
+{
+  "id": "nanoleaf",
+  "name": "Nanoleaf",
+  "icon": "icon.png",
+  "version": "0.3.0",
+  "apiVersion": "0.2",
+  "description": "Glow Nanoleaf Shapes in the colour of your live activity and fill them as you close in on its goal",
+  "author": {
+    "name": "@rshallam"
+  },
+  "category": "plugin",
+  "configuration": [],
+  "provides": {
+    "commands": {
+      "resume": {
+        "title": "Take the wall back",
+        "description": "Drive the panels again after someone else changed them (for example from the Nanoleaf app)",
+        "input": { "type": "object" }
+      },
+      "takeControl": {
+        "title": "Take control of the wall",
+        "description": "Hold the wall and show an effect on it until released or the lease lapses. Call it again to change or renew the effect. Refused while someone else holds it",
+        "input": {
+          "type": "object",
+          "properties": {
+            "effect": {
+              "type": "object",
+              "description": "What the wall shows",
+              "properties": {
+                "type": { "type": "string", "enum": ["pulse", "shuffle", "reveal"], "description": "pulse: a slow wave of the colours; shuffle: every panel changes colour on its own; reveal: the panels lock to one colour, once" },
+                "colors": { "type": "array", "items": { "type": "string" }, "description": "1 to 12 CSS colours" },
+                "periodMs": { "type": "integer", "minimum": 400, "maximum": 10000, "description": "The pulse's length (default: pulse 4000, shuffle 900)" },
+                "color": { "type": "string", "description": "reveal: the CSS colour every panel ends on" }
+              },
+              "required": ["type", "colors"]
+            },
+            "ttlMs": { "type": "integer", "minimum": 1000, "maximum": 120000, "description": "How long the lease lasts unless renewed (default 30000). A reveal's lease lasts as long as the reveal" },
+            "requestId": { "type": "string", "description": "Made up by the caller per request: repeating one answers as before and changes nothing" }
+          },
+          "required": ["effect"]
+        },
+        "output": {
+          "type": "object",
+          "properties": {
+            "granted": { "type": "boolean", "description": "The caller holds the wall" },
+            "reason": { "type": ["string", "null"], "enum": ["held", "paused", "not-allowed", null], "description": "Why not: someone else holds it, driving is switched off, or control by others is" },
+            "shown": { "type": "boolean", "description": "The plugin drives the panels, so the effect shows" },
+            "holder": { "type": ["string", "null"], "description": "Who holds the wall: a plugin's id, or integration" },
+            "leaseId": { "type": ["string", "null"] },
+            "effectId": { "type": ["string", "null"] },
+            "expiresAt": { "type": ["string", "null"] }
+          },
+          "required": ["granted", "reason", "shown", "holder", "leaseId", "effectId", "expiresAt"]
+        }
+      },
+      "releaseControl": {
+        "title": "Release the wall",
+        "description": "Let go of the wall after takeControl. Does nothing for anyone but the holder",
+        "input": {
+          "type": "object",
+          "properties": {
+            "leaseId": { "type": "string", "description": "Release only this hold (from takeControl); omit to release whatever the caller holds" }
+          }
+        },
+        "output": { "type": "object", "properties": { "released": { "type": "boolean" } }, "required": ["released"] }
+      }
+    },
+    "events": {
+      "touch": {
+        "title": "Panel touched",
+        "description": "Someone touched a panel on the wall",
+        "payload": {
+          "type": "object",
+          "properties": {
+            "panelId": { "type": "integer" },
+            "gesture": { "type": "string", "enum": ["tap", "double-tap", "swipe-up", "swipe-down", "swipe-left", "swipe-right"] }
+          },
+          "required": ["panelId", "gesture"]
+        }
+      }
+    },
+    "state": {
+      "connection": {
+        "title": "Controller connection",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "status": { "type": "string", "enum": ["unconfigured", "connecting", "connected", "unreachable", "unauthorized"] },
+            "host": { "type": ["string", "null"] },
+            "port": { "type": ["integer", "null"] },
+            "name": { "type": ["string", "null"] },
+            "model": { "type": ["string", "null"] },
+            "firmware": { "type": ["string", "null"] },
+            "error": { "type": ["string", "null"] },
+            "retryAt": { "type": ["string", "null"] },
+            "events": { "type": "boolean", "description": "The controller's event stream (layout changes, touches) is open" },
+            "since": { "type": "string" }
+          },
+          "required": ["status", "host", "port", "name", "model", "firmware", "error", "retryAt", "events", "since"]
+        }
+      },
+      "output": {
+        "title": "What the wall shows",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "mode": { "type": "string", "enum": ["disconnected", "idle", "live", "pinned", "control", "preview", "paused", "yielded", "busy"] },
+            "activityId": { "type": ["string", "null"] },
+            "fraction": { "type": ["number", "null"] },
+            "inControl": { "type": "boolean", "description": "The plugin is streaming to the panels" },
+            "detail": { "type": ["string", "null"] },
+            "since": { "type": "string" }
+          },
+          "required": ["mode", "activityId", "fraction", "inControl", "detail", "since"]
+        }
+      },
+      "control": {
+        "title": "Who controls the wall",
+        "description": "The lock another plugin or Home Assistant holds on the wall, or null",
+        "schema": {
+          "type": ["object", "null"],
+          "properties": {
+            "holder": { "type": "string" },
+            "leaseId": { "type": "string" },
+            "effect": {
+              "type": "object",
+              "properties": {
+                "id": { "type": "string" },
+                "type": { "type": "string", "enum": ["pulse", "shuffle", "reveal"] },
+                "colors": { "type": "array", "items": { "type": "array", "items": { "type": "integer", "minimum": 0, "maximum": 255 } }, "description": "LED colours: red, green, blue" },
+                "periodMs": { "type": "integer" },
+                "color": { "type": ["array", "null"], "items": { "type": "integer", "minimum": 0, "maximum": 255 } },
+                "startedAt": { "type": "number", "description": "Epoch milliseconds on the server's clock" }
+              },
+              "required": ["id", "type", "colors", "periodMs", "color", "startedAt"]
+            },
+            "since": { "type": "string" },
+            "expiresAt": { "type": "string" }
+          },
+          "required": ["holder", "leaseId", "effect", "since", "expiresAt"]
+        }
+      }
+    }
+  }
+}

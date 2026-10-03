@@ -1,0 +1,13 @@
+# arduino-cli build profile: `arduino-cli compile --profile s3zero` (README.md, "Building and flashing").
+# On this board CDCOnBoot=default *enables* USB CDC (serial over the USB-C port) and USBMode=hwcdc is the hardware
+# CDC/JTAG port; EraseFlash=none keeps the saved settings when flashing an update.
+profiles:
+  s3zero:
+    notes: Waveshare ESP32-S3-Zero, serial over USB, keeps settings on upload
+    fqbn: esp32:esp32:waveshare_esp32_s3_zero:CDCOnBoot=default,USBMode=hwcdc,PartitionScheme=default,CPUFreq=240,PSRAM=disabled,FlashMode=qio,UploadMode=default,UploadSpeed=921600,DebugLevel=none,EraseFlash=none
+    platforms:
+      - platform: esp32:esp32 (3.3.6)
+        platform_index_url: https://espressif.github.io/arduino-esp32/package_esp32_index.json
+    libraries:
+      - MFRC522 (1.4.12)
+default_profile: s3zero

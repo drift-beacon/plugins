@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Set up Cartridge Player</title>
+<link rel="stylesheet" href="portal.css">
+</head>
+<body>
+<main class="page">
+  <header class="device">
+    <div class="art" aria-hidden="true"><span class="slot"></span><span class="led"></span></div>
+    <div class="device-text">
+      <p class="eyebrow">Player setup</p>
+      <h1 id="name">Cartridge Player</h1>
+      <p class="pills"><span id="fw" class="pill" hidden></span><span id="reader" class="pill" hidden></span></p>
+    </div>
+  </header>
+
+  <p id="load-error" class="notice" role="alert" hidden></p>
+
+  <form id="form" novalidate>
+    <fieldset id="fields">
+      <legend class="sr">Settings</legend>
+      <section class="card" aria-labelledby="wifi-title">
+        <div class="card-head">
+          <div>
+            <p class="eyebrow">Step 1</p>
+            <h2 id="wifi-title">Wi-Fi</h2>
+          </div>
+          <button type="button" id="rescan" class="ghost small">Scan again</button>
+        </div>
+        <p class="hint">The network the player uses every day. It needs 2.4 GHz.</p>
+        <p id="scan-status" class="hint" aria-live="polite"></p>
+        <ul id="networks" class="networks" aria-label="Networks nearby"></ul>
+        <button type="button" id="other" class="net other" aria-pressed="false">Other network…</button>
+        <div id="ssid-wrap" class="field" hidden>
+          <label for="ssid">Network name</label>
+          <input id="ssid" maxlength="32" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false"
+            aria-describedby="ssid-error">
+        </div>
+        <p id="ssid-error" class="error" hidden></p>
+        <div id="password-wrap" class="field" hidden>
+          <label id="password-label" for="password">Password</label>
+          <div class="combo">
+            <input id="password" type="password" maxlength="64" autocomplete="off" autocapitalize="none"
+              autocorrect="off" spellcheck="false" aria-describedby="password-hint password-error">
+            <button type="button" id="password-toggle" class="ghost" aria-controls="password"
+              aria-pressed="false">Show</button>
+          </div>
+          <p id="password-hint" class="hint"></p>
+          <p id="password-error" class="error" hidden></p>
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="hub-title">
+        <p class="eyebrow">Step 2</p>
+        <h2 id="hub-title">Drift Beacon</h2>
+        <div id="code-wrap" class="field">
+          <label for="code">Setup code</label>
+          <div class="combo">
+            <input id="code" placeholder="CP1-…" autocomplete="off" autocapitalize="none" autocorrect="off"
+              spellcheck="false" aria-describedby="code-hint code-summary code-error">
+            <button type="button" id="paste" class="ghost">Paste</button>
+          </div>
+          <p id="code-hint" class="hint">Copy it from the Cartridge Player page in Drift Beacon before you join this
+            network.</p>
+          <p id="code-summary" class="summary" hidden></p>
+          <p id="code-error" class="error" hidden></p>
+        </div>
+        <div id="details" hidden>
+          <div class="pair">
+            <div class="field">
+              <label for="host">Hub address</label>
+              <input id="host" placeholder="192.168.1.12" inputmode="url" autocomplete="off" autocapitalize="none"
+                autocorrect="off" spellcheck="false" aria-describedby="host-error">
+              <p id="host-error" class="error" hidden></p>
+            </div>
+            <div class="field port">
+              <label for="port">Port</label>
+              <input id="port" value="9001" inputmode="numeric" pattern="[0-9]*" maxlength="5" autocomplete="off"
+                aria-describedby="port-error">
+              <p id="port-error" class="error" hidden></p>
+            </div>
+          </div>
+          <div class="field">
+            <label for="base">Plugin path</label>
+            <input id="base" placeholder="/api/plugins/…/api" inputmode="url" autocomplete="off"
+              autocapitalize="none" autocorrect="off" spellcheck="false" aria-describedby="base-hint base-error">
+            <p id="base-hint" class="hint">Shown on the Cartridge Player page in Drift Beacon.</p>
+            <p id="base-error" class="error" hidden></p>
+          </div>
+        </div>
+        <div id="key-wrap" class="field" hidden>
+          <label for="key">API key</label>
+          <input id="key" placeholder="db_…" autocomplete="off" autocapitalize="none" autocorrect="off"
+            spellcheck="false" aria-describedby="key-hint key-error">
+          <p id="key-hint" class="hint"></p>
+          <p id="key-error" class="error" hidden></p>
+        </div>
+        <button type="button" id="mode" class="link">Enter details instead</button>
+      </section>
+    </fieldset>
+
+    <button id="connect" class="primary" type="submit">Connect</button>
+    <p class="hint centre">The player's network may blink while it joins yours. Keep this page open.</p>
+  </form>
+
+  <section id="done" class="card finish" tabindex="-1" aria-labelledby="done-title" hidden>
+    <span class="tick" aria-hidden="true"></span>
+    <h2 id="done-title">Done</h2>
+    <p>This network closes in a minute. The Cartridge Player page in Drift Beacon should now say the player is
+      online.</p>
+    <p>To change these settings later, hold the player's BOOT button for 3 seconds.</p>
+  </section>
+
+  <section id="progress" class="card" aria-label="Progress" hidden>
+    <ol class="steps">
+      <li id="step-wifi"></li>
+      <li id="step-ip"></li>
+      <li id="step-plugin"></li>
+      <li id="step-saved"></li>
+    </ol>
+    <p id="note" class="note" role="status" aria-live="polite"></p>
+  </section>
+
+  <details class="advanced">
+    <summary>Advanced</summary>
+    <dl class="facts">
+      <dt>Device id</dt>
+      <dd id="device-id">…</dd>
+    </dl>
+    <button type="button" id="exit" class="ghost wide" hidden>Leave setup</button>
+    <button type="button" id="reset" class="ghost wide danger-text">Erase settings…</button>
+    <div id="reset-confirm" class="confirm" hidden>
+      <p>This erases the Wi-Fi and hub settings and restarts the player.</p>
+      <div class="actions">
+        <button type="button" id="reset-cancel" class="ghost">Cancel</button>
+        <button type="button" id="reset-go" class="danger">Erase and restart</button>
+      </div>
+    </div>
+    <p id="advanced-status" class="hint" role="status" aria-live="polite"></p>
+  </details>
+</main>
+<script src="portal.js"></script>
+</body>
+</html>

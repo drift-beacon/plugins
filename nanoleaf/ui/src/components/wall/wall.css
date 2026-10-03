@@ -1,0 +1,151 @@
+/*
+ * The wall section's few hand-written styles. Loops here only mean "waiting for you" and stop under reduced motion;
+ * everything one-off is driven by Motion in the components.
+ */
+:root {
+  --wall-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+/*
+ * The stage stays a dark wall in a light theme: panels glow on a dark wall, and a white stage would wash every colour
+ * out. Inside it the theme's neutral tokens become dark ones (the SDK's dark fallback, as in ../../../../theme.css) and
+ * HeroUI's are re-derived from them, so the stage's own labels, switches and buttons read on it. In a dark theme the
+ * stage keeps the app's own tokens.
+ */
+:root.light .wall-stage,
+:root[data-color-mode="light"] .wall-stage {
+  --db-background: #09090b;
+  --db-foreground: #fafafa;
+  --db-surface: #18181b;
+  --db-surface-foreground: #fafafa;
+  --db-surface-raised: #27272a;
+  --db-muted: #a1a1aa;
+  --db-border: #3f3f46;
+  --heroui-background: from var(--db-background) h s l;
+  --heroui-foreground: from var(--db-foreground) h s l;
+  --heroui-content1: from var(--db-surface) h s l;
+  --heroui-content1-foreground: from var(--db-surface-foreground) h s l;
+  --heroui-content2: from var(--db-surface-raised) h s l;
+  --heroui-content2-foreground: from var(--db-surface-foreground) h s l;
+  --heroui-content3: from var(--db-surface-raised) h s l;
+  --heroui-content3-foreground: from var(--db-surface-foreground) h s l;
+  --heroui-content4: from var(--db-surface-raised) h s l;
+  --heroui-content4-foreground: from var(--db-surface-foreground) h s l;
+  --heroui-divider: from var(--db-border) h s l;
+  --heroui-default: from var(--db-surface-raised) h s l;
+  --heroui-default-foreground: from var(--db-foreground) h s l;
+  --heroui-default-50: from var(--db-surface) h s l;
+  --heroui-default-100: from var(--db-surface-raised) h s l;
+  --heroui-default-200: from var(--db-border) h s l;
+  --heroui-default-300: from color-mix(in srgb, var(--db-border), var(--db-muted) 35%) h s l;
+  --heroui-default-400: from var(--db-muted) h s l;
+  --heroui-default-500: from var(--db-muted) h s l;
+  --heroui-default-600: from color-mix(in srgb, var(--db-muted), var(--db-foreground) 40%) h s l;
+  --heroui-default-700: from var(--db-foreground) h s l;
+  --heroui-default-800: from var(--db-foreground) h s l;
+  --heroui-default-900: from var(--db-foreground) h s l;
+  color-scheme: dark;
+}
+
+/* Tap to order: unnumbered panels' dashed outlines creep, slowly, to say "tap me". Constant motion runs linear. */
+@keyframes wall-march {
+  to {
+    stroke-dashoffset: -18;
+  }
+}
+.wall-march {
+  animation: wall-march 1.4s linear infinite;
+}
+
+/* Tap on your wall: the hand taps while the wall is listening. */
+@keyframes wall-tap {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  40% {
+    transform: translateY(2px) scale(0.92);
+  }
+}
+.wall-tap {
+  animation: wall-tap 1.2s var(--wall-ease-out) infinite;
+}
+
+/* Keyboard focus on a panel while drafting: an outline the pointer never shows. */
+.wall-hit:focus-visible {
+  stroke: var(--db-focus);
+  stroke-width: 2px;
+}
+
+/* The goal scrubber: a native range (keyboard and screen readers for free) over the panel track. */
+.wall-range {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  height: 28px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.wall-range::-webkit-slider-runnable-track {
+  height: 28px;
+  background: transparent;
+}
+.wall-range::-moz-range-track {
+  height: 28px;
+  background: transparent;
+}
+.wall-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 5px;
+  border-radius: 9999px;
+  background: var(--db-foreground);
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--wall-accent, var(--db-accent)) 35%, transparent),
+    0 2px 8px rgb(0 0 0 / 0.5);
+  transition: transform 150ms var(--wall-ease-out);
+}
+.wall-range::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 9999px;
+  background: var(--db-foreground);
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--wall-accent, var(--db-accent)) 35%, transparent),
+    0 2px 8px rgb(0 0 0 / 0.5);
+  transition: transform 150ms var(--wall-ease-out);
+}
+.wall-range:active::-webkit-slider-thumb {
+  transform: scale(1.15);
+}
+.wall-range:active::-moz-range-thumb {
+  transform: scale(1.15);
+}
+.wall-range:focus {
+  outline: none;
+}
+.wall-range:focus-visible::-webkit-slider-thumb {
+  outline: 2px solid var(--db-focus);
+  outline-offset: 3px;
+}
+.wall-range:focus-visible::-moz-range-thumb {
+  outline: 2px solid var(--db-focus);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wall-march,
+  .wall-tap {
+    animation: none;
+  }
+  /* Separate rules: a browser drops a whole rule over a pseudo-element it doesn't know. */
+  .wall-range::-webkit-slider-thumb {
+    transition: none;
+  }
+  .wall-range::-moz-range-thumb {
+    transition: none;
+  }
+}

@@ -1,0 +1,114 @@
+/* HeroUI 2 adapter for the public Drift Beacon theme. CSS relative colors preserve
+ * HeroUI's hsl(var(--heroui-*) / opacity) utilities without owning a second palette.
+ * Defaults also keep standalone prototypes and pre-connection UI legible. */
+:root {
+  --db-background: #09090b;
+  --db-foreground: #fafafa;
+  --db-surface: #18181b;
+  --db-surface-foreground: #fafafa;
+  --db-surface-raised: #27272a;
+  --db-muted: #a1a1aa;
+  --db-border: #3f3f46;
+  --db-accent: #2563eb;
+  --db-accent-foreground: #fff;
+  --db-danger: #ef4444;
+  --db-danger-foreground: #fff;
+  --db-success: #4ade80;
+  --db-success-foreground: #052e16;
+  --db-warning: #fbbf24;
+  --db-warning-foreground: #422006;
+  --db-focus: #3b82f6;
+  color-scheme: dark;
+}
+/* Unlayered: override HeroUI's base palette in both its light and dark selectors. */
+:root, :root.light, :root.dark {
+  --heroui-background: from var(--db-background) h s l;
+  --heroui-foreground: from var(--db-foreground) h s l;
+  --heroui-content1: from var(--db-surface) h s l;
+  --heroui-content1-foreground: from var(--db-surface-foreground) h s l;
+  --heroui-content2: from var(--db-surface-raised) h s l;
+  --heroui-content2-foreground: from var(--db-surface-foreground) h s l;
+  --heroui-content3: from var(--db-surface-raised) h s l;
+  --heroui-content3-foreground: from var(--db-surface-foreground) h s l;
+  --heroui-content4: from var(--db-surface-raised) h s l;
+  --heroui-content4-foreground: from var(--db-surface-foreground) h s l;
+  --heroui-divider: from var(--db-border) h s l;
+  --heroui-focus: from var(--db-focus) h s l;
+  --heroui-primary: from var(--db-accent) h s l;
+  --heroui-primary-foreground: from var(--db-accent-foreground) h s l;
+  --heroui-secondary: from var(--db-accent) h s l;
+  --heroui-secondary-foreground: from var(--db-accent-foreground) h s l;
+  --heroui-success: from var(--db-success) h s l;
+  --heroui-success-foreground: from var(--db-success-foreground) h s l;
+  --heroui-warning: from var(--db-warning) h s l;
+  --heroui-warning-foreground: from var(--db-warning-foreground) h s l;
+  --heroui-danger: from var(--db-danger) h s l;
+  --heroui-danger-foreground: from var(--db-danger-foreground) h s l;
+  --heroui-default: from var(--db-surface-raised) h s l;
+  --heroui-default-foreground: from var(--db-foreground) h s l;
+  --heroui-default-50: from var(--db-surface) h s l;
+  --heroui-primary-50: from color-mix(in srgb, var(--db-accent) 10%, var(--db-surface)) h s l;
+  --heroui-secondary-50: from color-mix(in srgb, var(--db-accent) 10%, var(--db-surface)) h s l;
+  --heroui-success-50: from color-mix(in srgb, var(--db-success) 10%, var(--db-surface)) h s l;
+  --heroui-warning-50: from color-mix(in srgb, var(--db-warning) 10%, var(--db-surface)) h s l;
+  --heroui-danger-50: from color-mix(in srgb, var(--db-danger) 10%, var(--db-surface)) h s l;
+  --heroui-default-100: from var(--db-surface-raised) h s l;
+  --heroui-primary-100: from color-mix(in srgb, var(--db-accent) 20%, var(--db-surface)) h s l;
+  --heroui-secondary-100: from color-mix(in srgb, var(--db-accent) 20%, var(--db-surface)) h s l;
+  --heroui-success-100: from color-mix(in srgb, var(--db-success) 20%, var(--db-surface)) h s l;
+  --heroui-warning-100: from color-mix(in srgb, var(--db-warning) 20%, var(--db-surface)) h s l;
+  --heroui-danger-100: from color-mix(in srgb, var(--db-danger) 20%, var(--db-surface)) h s l;
+  --heroui-default-200: from var(--db-border) h s l;
+  --heroui-primary-200: from color-mix(in srgb, var(--db-accent) 40%, var(--db-surface)) h s l;
+  --heroui-secondary-200: from color-mix(in srgb, var(--db-accent) 40%, var(--db-surface)) h s l;
+  --heroui-success-200: from color-mix(in srgb, var(--db-success) 40%, var(--db-surface)) h s l;
+  --heroui-warning-200: from color-mix(in srgb, var(--db-warning) 40%, var(--db-surface)) h s l;
+  --heroui-danger-200: from color-mix(in srgb, var(--db-danger) 40%, var(--db-surface)) h s l;
+  --heroui-default-300: from color-mix(in srgb, var(--db-border), var(--db-muted) 35%) h s l;
+  --heroui-primary-300: from color-mix(in srgb, var(--db-accent) 60%, var(--db-surface)) h s l;
+  --heroui-secondary-300: from color-mix(in srgb, var(--db-accent) 60%, var(--db-surface)) h s l;
+  --heroui-success-300: from color-mix(in srgb, var(--db-success) 60%, var(--db-surface)) h s l;
+  --heroui-warning-300: from color-mix(in srgb, var(--db-warning) 60%, var(--db-surface)) h s l;
+  --heroui-danger-300: from color-mix(in srgb, var(--db-danger) 60%, var(--db-surface)) h s l;
+  --heroui-default-400: from var(--db-muted) h s l;
+  --heroui-primary-400: from color-mix(in srgb, var(--db-accent) 80%, var(--db-surface)) h s l;
+  --heroui-secondary-400: from color-mix(in srgb, var(--db-accent) 80%, var(--db-surface)) h s l;
+  --heroui-success-400: from color-mix(in srgb, var(--db-success) 80%, var(--db-surface)) h s l;
+  --heroui-warning-400: from color-mix(in srgb, var(--db-warning) 80%, var(--db-surface)) h s l;
+  --heroui-danger-400: from color-mix(in srgb, var(--db-danger) 80%, var(--db-surface)) h s l;
+  --heroui-default-500: from var(--db-muted) h s l;
+  --heroui-primary-500: from color-mix(in srgb, var(--db-accent) 100%, var(--db-surface)) h s l;
+  --heroui-secondary-500: from color-mix(in srgb, var(--db-accent) 100%, var(--db-surface)) h s l;
+  --heroui-success-500: from color-mix(in srgb, var(--db-success) 100%, var(--db-surface)) h s l;
+  --heroui-warning-500: from color-mix(in srgb, var(--db-warning) 100%, var(--db-surface)) h s l;
+  --heroui-danger-500: from color-mix(in srgb, var(--db-danger) 100%, var(--db-surface)) h s l;
+  --heroui-default-600: from color-mix(in srgb, var(--db-muted), var(--db-foreground) 40%) h s l;
+  --heroui-primary-600: from color-mix(in srgb, var(--db-accent) 100%, var(--db-surface)) h s l;
+  --heroui-secondary-600: from color-mix(in srgb, var(--db-accent) 100%, var(--db-surface)) h s l;
+  --heroui-success-600: from color-mix(in srgb, var(--db-success) 100%, var(--db-surface)) h s l;
+  --heroui-warning-600: from color-mix(in srgb, var(--db-warning) 100%, var(--db-surface)) h s l;
+  --heroui-danger-600: from color-mix(in srgb, var(--db-danger) 100%, var(--db-surface)) h s l;
+  --heroui-default-700: from var(--db-foreground) h s l;
+  --heroui-primary-700: from color-mix(in srgb, var(--db-accent) 100%, var(--db-surface)) h s l;
+  --heroui-secondary-700: from color-mix(in srgb, var(--db-accent) 100%, var(--db-surface)) h s l;
+  --heroui-success-700: from color-mix(in srgb, var(--db-success) 100%, var(--db-surface)) h s l;
+  --heroui-warning-700: from color-mix(in srgb, var(--db-warning) 100%, var(--db-surface)) h s l;
+  --heroui-danger-700: from color-mix(in srgb, var(--db-danger) 100%, var(--db-surface)) h s l;
+  --heroui-default-800: from var(--db-foreground) h s l;
+  --heroui-primary-800: from color-mix(in srgb, var(--db-accent) 100%, var(--db-surface)) h s l;
+  --heroui-secondary-800: from color-mix(in srgb, var(--db-accent) 100%, var(--db-surface)) h s l;
+  --heroui-success-800: from color-mix(in srgb, var(--db-success) 100%, var(--db-surface)) h s l;
+  --heroui-warning-800: from color-mix(in srgb, var(--db-warning) 100%, var(--db-surface)) h s l;
+  --heroui-danger-800: from color-mix(in srgb, var(--db-danger) 100%, var(--db-surface)) h s l;
+  --heroui-default-900: from var(--db-foreground) h s l;
+  --heroui-primary-900: from color-mix(in srgb, var(--db-accent) 100%, var(--db-surface)) h s l;
+  --heroui-secondary-900: from color-mix(in srgb, var(--db-accent) 100%, var(--db-surface)) h s l;
+  --heroui-success-900: from color-mix(in srgb, var(--db-success) 100%, var(--db-surface)) h s l;
+  --heroui-warning-900: from color-mix(in srgb, var(--db-warning) 100%, var(--db-surface)) h s l;
+  --heroui-danger-900: from color-mix(in srgb, var(--db-danger) 100%, var(--db-surface)) h s l;
+}
+body {
+  margin: 0;
+  background: var(--db-background);
+  color: var(--db-foreground);
+}

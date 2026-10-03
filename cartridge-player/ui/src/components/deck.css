@@ -1,0 +1,289 @@
+/*
+ * The Deck's own CSS: the curves (namespaced, so Tailwind's --ease-* tokens stay as they are), the physical
+ * materials that don't follow the theme (the cartridge shell, the player's amber clock), touch sizes, focus rings,
+ * and the few predetermined loops. Every loop means something is live or waiting (a cartridge being read, a session
+ * tracking, a cartridge needing a label) and stops under reduced motion; one-off moments are driven by Motion.
+ */
+:root {
+  --cp-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --cp-ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+}
+
+/* Focus is always visible for keyboard users, in the host's focus colour. */
+:where(button, a, summary, [role="option"], [tabindex]):focus-visible {
+  outline: 2px solid var(--db-focus);
+  outline-offset: 2px;
+}
+
+/*
+ * Pressables: instant feedback. This file is outside Tailwind's layers, so a `transition` here beats any transition
+ * utility on the same element: the whole list lives here (the press, and the colour changes of hover and disabled),
+ * and pressables carry no transition utilities of their own.
+ */
+.cp-press {
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    transform 160ms var(--cp-ease-out),
+    background-color 150ms ease-out,
+    color 150ms ease-out,
+    opacity 150ms ease-out;
+}
+.cp-press:active {
+  transform: scale(0.97);
+}
+
+/* Touch screens get 44 px targets, whatever the control's drawn size. */
+@media (pointer: coarse) {
+  .cp-touch {
+    min-height: 44px;
+  }
+}
+
+/* Shelf cartridges lift a touch under a real pointer only, and still press in while lifted. */
+.cp-lift {
+  transition: transform 180ms var(--cp-ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  .cp-lift:hover {
+    transform: translateY(-3px);
+  }
+  .cp-lift:hover:active {
+    transform: translateY(-3px) scale(0.97);
+  }
+}
+
+/* The stage: a themed surface with a little warm light from the top left, so the player sits in a room. */
+.cp-stage {
+  background:
+    radial-gradient(ellipse 70% 90% at 28% 0%, rgb(255 236 210 / 0.07), transparent 70%),
+    var(--db-surface);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--db-foreground) 6%, transparent);
+}
+.cp-stage-phone {
+  box-shadow:
+    0 1px 0 color-mix(in srgb, var(--db-foreground) 7%, transparent),
+    0 12px 24px -12px rgb(0 0 0 / 0.45);
+}
+
+/* Shadows on the desk: deep on a dark surface, softer on a light one, where a dark blur reads as a smudge. */
+.cp-shadow-contact {
+  opacity: 0.6;
+}
+.cp-shadow-cart {
+  opacity: 0.5;
+}
+:root.light .cp-shadow-contact {
+  opacity: 0.35;
+}
+:root.light .cp-shadow-cart {
+  opacity: 0.22;
+}
+
+/* The player's display: amber like a VFD on a dark surface, a deeper amber on a light one. */
+.cp-clock {
+  color: #ffb45c;
+  text-shadow: 0 0 18px rgb(255 160 60 / 0.45);
+}
+:root.light .cp-clock {
+  color: #b45309;
+  text-shadow: none;
+}
+
+/* A cartridge's shell is plastic, in any theme; the one in the player is a dashed ghost of itself. */
+.cp-shell {
+  background: linear-gradient(180deg, #5f5b55, #45423e);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.12),
+    0 14px 24px -16px rgb(0 0 0 / 0.9);
+}
+.cp-shell[data-ghost] {
+  background: transparent;
+  box-shadow: none;
+}
+
+/*
+ * Suggestions wrap on a wide stage. Where the status column is narrow they stay on one line and scroll sideways, so
+ * the label prompt is no taller than the other phases and the stage keeps its height; on a phone the row runs to the
+ * card's edges.
+ */
+.cp-chips {
+  flex-wrap: wrap;
+}
+@media (max-width: 767px) {
+  .cp-chips {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .cp-chips::-webkit-scrollbar {
+    display: none;
+  }
+}
+@media (max-width: 599px) {
+  .cp-chips {
+    margin-inline: -1rem;
+    padding-inline: 1rem;
+  }
+}
+
+/* Loading: appears only after a beat, so a quick connection never flashes it. */
+@keyframes cp-appear {
+  from {
+    opacity: 0;
+  }
+}
+.cp-appear {
+  animation: cp-appear 300ms var(--cp-ease-out) 400ms both;
+}
+
+/* A floating list opening from the field it hangs on (its inline transform-origin is the edge next to the field). */
+@keyframes cp-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+}
+.cp-pop {
+  animation: cp-pop 140ms var(--cp-ease-out) both;
+}
+
+/* NFC field: three rings leave the antenna while a cartridge is being read. */
+@keyframes cp-wave {
+  from {
+    transform: scale(0.55);
+    opacity: 0.85;
+  }
+  to {
+    transform: scale(1.55);
+    opacity: 0;
+  }
+}
+.cp-wave {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: cp-wave 900ms var(--cp-ease-out) infinite;
+}
+.cp-wave:nth-of-type(2) {
+  animation-delay: 150ms;
+}
+.cp-wave:nth-of-type(3) {
+  animation-delay: 300ms;
+}
+
+/* The LED: breathes while tracking, blinks fast while reading, and a few times when it wants attention. */
+@keyframes cp-breathe {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.cp-breathe {
+  animation: cp-breathe 2.4s ease-in-out infinite;
+}
+@keyframes cp-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0.2;
+  }
+}
+.cp-blink {
+  animation: cp-blink 420ms steps(1) infinite;
+}
+.cp-blink-few {
+  animation: cp-blink 1.1s steps(1) 6;
+}
+.cp-led-dot {
+  transition: fill 200ms ease;
+}
+/* The halo comes on rather than popping in when the guide turns the light on. */
+.cp-led-halo {
+  transition: opacity 400ms ease;
+}
+
+/* A one-off shine across a freshly applied sticker. */
+/* Listening for a player: one ring leaving the dot, slowly. */
+@keyframes cp-ring {
+  from {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  to {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+.cp-ring {
+  animation: cp-ring 1.8s var(--cp-ease-out) infinite;
+}
+
+@keyframes cp-shine {
+  from {
+    transform: translateX(-130%) skewX(-18deg);
+  }
+  to {
+    transform: translateX(260%) skewX(-18deg);
+  }
+}
+.cp-shine {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 45%;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.55), transparent);
+  animation: cp-shine 750ms var(--cp-ease-out) 250ms both;
+}
+
+/* A new cartridge's question mark wiggles once when it appears, then holds still. */
+@keyframes cp-wiggle {
+  0%,
+  100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(-4deg);
+  }
+  60% {
+    transform: rotate(3deg);
+  }
+}
+.cp-wiggle {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  animation: cp-wiggle 520ms var(--cp-ease-in-out) 300ms 1 both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cp-appear {
+    animation-duration: 1ms;
+  }
+  .cp-wave,
+  .cp-wiggle,
+  .cp-breathe,
+  .cp-blink,
+  .cp-blink-few {
+    animation: none;
+  }
+  .cp-wave {
+    opacity: 0.35;
+  }
+  .cp-pop {
+    animation: cp-appear 140ms ease-out both;
+  }
+  .cp-shine,
+  .cp-ring {
+    display: none;
+  }
+  .cp-press:active,
+  .cp-lift,
+  .cp-lift:hover,
+  .cp-lift:hover:active {
+    transform: none;
+  }
+}

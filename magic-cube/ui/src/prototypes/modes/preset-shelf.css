@@ -1,0 +1,7 @@
+/* Menus are discoverable on every card, independent of the loaded preset. */
+.preset-card-actions { opacity: 0; pointer-events: none; transition: opacity 120ms ease-out; }
+.group:hover > .preset-card-actions,
+.group:focus-within > .preset-card-actions,
+.preset-card-actions:has([data-menu-open="true"]) { opacity: 1; pointer-events: auto; }
+@media (hover: none) { .preset-card-actions { opacity: 1; pointer-events: auto; } }
+@media (prefers-reduced-motion: reduce) { .preset-card-actions { transition: none; } }

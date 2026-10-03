@@ -1,0 +1,4 @@
+{
+  "files": [],
+  "references": [{ "path": "./.drift-beacon/tsconfig.main.json" }, { "path": "./.drift-beacon/tsconfig.ui.json" }]
+}

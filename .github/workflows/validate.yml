@@ -1,0 +1,38 @@
+name: Validate plugins
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26.10.0
+          package-manager-cache: false
+      - run: npm install --global pnpm@12.5.1
+      - run: node --test scripts/*.test.mjs
+      - name: Check that servers can install every published version advertised here
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/plugin-release.mjs check
+      - run: pnpm install --frozen-lockfile
+      # Firmware host tests must run, rather than skip for a missing compiler.
+      - run: c++ --version
+      - run: pnpm -r test
+      - name: Typecheck, build and validate every release ZIP
+        run: pnpm -r exec dbplugin pack

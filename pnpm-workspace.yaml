@@ -1,0 +1,10 @@
+packages:
+  - "*"
+
+# Install scripts pnpm skips: both packages work without them.
+allowBuilds:
+  esbuild: false
+  "@heroui/shared-utils": false
+
+minimumReleaseAgeExclude:
+  - '@drift-beacon/plugin@0.2.5'

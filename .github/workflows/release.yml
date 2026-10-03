@@ -1,0 +1,76 @@
+name: Publish plugins
+
+# Drift Beacon offers the version in each manifest.json on main, and installs the release tagged <id>-<version>.
+# Each push publishes the advertised versions that have no release yet: to release, change "version" and push.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One run at a time. A push during a run waits for it, then publishes what main advertises by then.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  pending:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      plugins: ${{ steps.pending.outputs.plugins }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26.10.0
+          package-manager-cache: false
+      - run: node --test scripts/*.test.mjs
+      - name: Find the advertised versions without a release
+        id: pending
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/plugin-release.mjs pending
+
+  publish:
+    name: Publish ${{ matrix.plugin.tag }}
+    needs: pending
+    if: needs.pending.outputs.plugins != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    strategy:
+      # A plugin whose tests fail doesn't hold back the others.
+      fail-fast: false
+      matrix:
+        plugin: ${{ fromJSON(needs.pending.outputs.plugins) }}
+    env:
+      PLUGIN_DIR: ${{ matrix.plugin.directory }}
+      RELEASE_TAG: ${{ matrix.plugin.tag }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26.10.0
+          package-manager-cache: false
+      - run: npm install --global pnpm@12.5.1
+      - run: pnpm install --frozen-lockfile
+      # Firmware host tests must run, rather than skip for a missing compiler.
+      - run: c++ --version
+      - name: Test the plugin
+        run: pnpm --dir "$PLUGIN_DIR" test
+      - name: Typecheck, build and package the plugin
+        # pnpm run adds a banner; exec preserves the pack command's JSON stdout.
+        run: pnpm --dir "$PLUGIN_DIR" exec dbplugin pack > package-result.json
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/plugin-release.mjs publish

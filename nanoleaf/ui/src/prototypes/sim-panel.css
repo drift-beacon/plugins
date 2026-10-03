@@ -1,0 +1,135 @@
+/* Harness chrome, not a design contestant: it borrows the picker's dark glass so it never reads as product UI. */
+.sim-panel {
+  position: fixed;
+  right: 24px;
+  /* Above the picker's row, so the two never overlap however narrow the window. */
+  bottom: 72px;
+  z-index: 2147483646;
+  width: 268px;
+  padding: 10px;
+  border-radius: 14px;
+  background: rgba(10, 10, 10, 0.82);
+  -webkit-backdrop-filter: blur(12px) saturate(1.4);
+  backdrop-filter: blur(12px) saturate(1.4);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.08) inset,
+    0 8px 24px rgba(0, 0, 0, 0.24),
+    0 2px 6px rgba(0, 0, 0, 0.12);
+  color: rgba(255, 255, 255, 0.85);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 12px;
+  line-height: 1.2;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+
+/* Collapsed, it shrinks to its title so it stays out of the way at phone widths. */
+.sim-panel[data-collapsed] {
+  width: auto;
+  max-width: 268px;
+}
+
+.sim-title {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0;
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.45);
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.sim-readout {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+  color: rgba(255, 255, 255, 0.7);
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.sim-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.3);
+}
+.sim-dot[data-mode="live"] { background: #4ade80; }
+.sim-dot[data-mode="pinned"] { background: #c084fc; }
+.sim-dot[data-mode="preview"] { background: #38bdf8; }
+.sim-dot[data-mode="yielded"],
+.sim-dot[data-mode="busy"],
+.sim-dot[data-mode="paused"] { background: #fbbf24; }
+.sim-dot[data-mode="disconnected"],
+.sim-dot[data-mode="main down"] { background: #f87171; }
+
+.sim-group {
+  margin: 10px 2px 4px;
+  color: rgba(255, 255, 255, 0.35);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.sim-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 4px;
+}
+
+.sim-btn {
+  height: 28px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.85);
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 150ms ease,
+    transform 160ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+.sim-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+.sim-btn:active {
+  transform: scale(0.97);
+}
+.sim-btn kbd {
+  margin-left: 4px;
+  color: rgba(255, 255, 255, 0.4);
+  font: inherit;
+  font-size: 10px;
+}
+
+.sim-foot {
+  margin: 8px 2px 0;
+  color: rgba(255, 255, 255, 0.35);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+@media (max-width: 480px) {
+  .sim-panel {
+    right: 12px;
+  }
+}
+
+.sim-name {
+  flex: none;
+}

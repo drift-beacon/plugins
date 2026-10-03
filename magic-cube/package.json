@@ -1,0 +1,37 @@
+{
+  "name": "@plugin/magic-cube",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "release": "dbplugin pack",
+    "postinstall": "dbplugin prepare",
+    "test": "node --test tests/*.test.mjs"
+  },
+  "dependencies": {
+    "@heroui/react": "2.8.3",
+    "@heroui/theme": "2.4.21",
+    "@react-three/drei": "^10.0.0",
+    "@react-three/fiber": "^9.1.0",
+    "@react-three/postprocessing": "^3.0.4",
+    "lucide-react": "0.546.0",
+    "motion": "12.23.12",
+    "postprocessing": "^6.38.3",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "three": "^0.172.0"
+  },
+  "devDependencies": {
+    "@drift-beacon/plugin": "^0.2.5",
+    "@tailwindcss/vite": "^4.1.18",
+    "@types/node": "^25.3.0",
+    "@types/react": "19.2.2",
+    "@types/react-dom": "19.2.2",
+    "@types/three": "^0.172.0",
+    "@vitejs/plugin-react": "5.0.3",
+    "tailwindcss": "^4.1.18",
+    "typescript": "~5.9.3",
+    "vite": "7.1.2"
+  }
+}

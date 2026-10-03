@@ -1,0 +1,697 @@
+/* Drift Beacon's palette (theme.css and the siblings' light values), as plain tokens: the page runs offline on the
+   player, so it carries its own copy. No color-mix, so older captive-portal browsers render it the same. */
+:root {
+  --bg: #f8f8f8;
+  --fg: #18181b;
+  --surface: #fff;
+  --raised: #f4f4f5;
+  --ring: #e4e4e7;
+  --muted: #71717a;
+  --border: #d4d4d8;
+  --accent: #2563eb;
+  --accent-fg: #fff;
+  --accent-soft: rgba(37, 99, 235, 0.08);
+  --danger: #b91c1c;
+  --danger-soft: rgba(185, 28, 28, 0.08);
+  --success: #15803d;
+  --success-soft: rgba(21, 128, 61, 0.1);
+  --focus: #3b82f6;
+  --led: #3b82f6;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #09090b;
+    --fg: #fafafa;
+    --surface: #18181b;
+    --raised: #27272a;
+    --ring: #27272a;
+    --muted: #a1a1aa;
+    --border: #3f3f46;
+    --accent-soft: rgba(59, 130, 246, 0.16);
+    --danger: #ef4444;
+    --danger-soft: rgba(239, 68, 68, 0.12);
+    --success: #4ade80;
+    --success-soft: rgba(74, 222, 128, 0.12);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+.page {
+  max-width: 28rem;
+  margin: 0 auto;
+  padding: 16px 16px 32px;
+  padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 32px
+    max(16px, env(safe-area-inset-left));
+}
+
+h1,
+h2,
+p,
+ol,
+ul,
+dl,
+dd {
+  margin: 0;
+}
+
+h1 {
+  font-size: 22px;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+h2 {
+  font-size: 18px;
+  line-height: 1.25;
+}
+
+.eyebrow {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 14px;
+  margin-top: 6px;
+}
+
+.hint:empty,
+.note:empty {
+  display: none;
+}
+
+.centre {
+  text-align: center;
+  margin: 10px 8px 0;
+}
+
+.sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* The header: the player itself, its LED breathing blue as it does in setup mode. */
+.device {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 4px 20px;
+}
+
+.device-text {
+  min-width: 0;
+}
+
+.art {
+  position: relative;
+  flex: none;
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background: linear-gradient(160deg, #3f3f46, #18181b);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), 0 0 0 1px var(--ring), 0 6px 16px rgba(0, 0, 0, 0.18);
+}
+
+.slot {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 14px;
+  height: 6px;
+  border-radius: 3px;
+  background: #09090b;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+.led {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--led);
+  box-shadow: 0 0 8px var(--led);
+  animation: breathe 2.4s ease-in-out infinite;
+}
+
+@keyframes breathe {
+  50% {
+    opacity: 0.35;
+    box-shadow: 0 0 2px var(--led);
+  }
+}
+
+.pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--raised);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.pill.ok::before,
+.pill.bad::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.pill.ok {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.pill.bad {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.notice {
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 14px;
+}
+
+fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.card {
+  margin-bottom: 12px;
+  padding: 16px;
+  border-radius: 24px;
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--ring);
+}
+
+.card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* Networks: whole-row buttons, the chosen one tinted with the accent. */
+.networks {
+  list-style: none;
+  padding: 0;
+  margin-top: 10px;
+}
+
+.networks li + li {
+  margin-top: 4px;
+}
+
+.net {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.net:hover {
+  background: var(--raised);
+}
+
+.net[aria-pressed="true"] {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+
+.net.other {
+  margin-top: 4px;
+  color: var(--muted);
+}
+
+.net-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.badge {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--raised);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.net-meta {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.lock {
+  position: relative;
+  width: 10px;
+  height: 8px;
+  margin-top: 5px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
+.lock::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: -5px;
+  width: 6px;
+  height: 6px;
+  border: 1.5px solid currentColor;
+  border-bottom: 0;
+  border-radius: 4px 4px 0 0;
+  box-sizing: border-box;
+}
+
+.bars {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 14px;
+}
+
+.bars i {
+  width: 3px;
+  border-radius: 1px;
+  background: var(--border);
+}
+
+.bars i:nth-child(1) {
+  height: 25%;
+}
+
+.bars i:nth-child(2) {
+  height: 50%;
+}
+
+.bars i:nth-child(3) {
+  height: 75%;
+}
+
+.bars i:nth-child(4) {
+  height: 100%;
+}
+
+.l1 i:nth-child(-n + 1),
+.l2 i:nth-child(-n + 2),
+.l3 i:nth-child(-n + 3),
+.l4 i {
+  background: var(--fg);
+}
+
+/* Fields: 16px text so iOS doesn't zoom, 48px tall. */
+.field {
+  margin-top: 14px;
+}
+
+label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+input {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  font-size: 16px;
+}
+
+input::placeholder {
+  color: var(--muted);
+  opacity: 0.8;
+}
+
+input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.combo {
+  display: flex;
+  gap: 8px;
+}
+
+.combo input {
+  flex: 1;
+  min-width: 0;
+}
+
+.pair {
+  display: flex;
+  gap: 8px;
+}
+
+.pair .field {
+  flex: 1;
+  min-width: 0;
+}
+
+.pair .port {
+  flex: 0 0 6.5rem;
+}
+
+.error {
+  margin-top: 6px;
+  color: var(--danger);
+  font-size: 14px;
+}
+
+.summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: var(--success-soft);
+  color: var(--success);
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.primary {
+  display: block;
+  width: 100%;
+  min-height: 52px;
+  border: 0;
+  border-radius: 16px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.ghost {
+  flex: none;
+  min-height: 48px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--raised);
+  color: var(--fg);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.ghost.small {
+  min-height: 44px;
+  padding: 0 14px;
+  font-size: 14px;
+}
+
+.ghost.wide {
+  display: block;
+  width: 100%;
+  margin-top: 10px;
+}
+
+.danger-text {
+  color: var(--danger);
+}
+
+.danger {
+  min-height: 48px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--danger);
+  color: #fff;
+  font-weight: 600;
+}
+
+.link {
+  min-height: 44px;
+  margin-top: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* The live checklist: pending ring, spinning ring, success tick, danger mark. */
+.steps {
+  list-style: none;
+  padding: 0;
+}
+
+.steps li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 36px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.steps li::before {
+  content: "";
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--border);
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+
+.steps .active {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.steps .active::before {
+  border-color: var(--accent);
+  border-top-color: transparent;
+  animation: spin 0.9s linear infinite;
+}
+
+.steps .done {
+  color: var(--fg);
+}
+
+.steps .done::before {
+  border: 0;
+  background: var(--success)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M5.5 10.5l3 3 6-7' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / 20px no-repeat;
+}
+
+.steps .failed {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.steps .failed::before {
+  border: 0;
+  background: var(--danger)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M7 7l6 6M13 7l-6 6' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round'/%3E%3C/svg%3E")
+    center / 20px no-repeat;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+.note {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--raised);
+  font-size: 14px;
+}
+
+.finish {
+  padding: 24px 20px;
+  text-align: center;
+  outline: none;
+}
+
+.finish p {
+  margin-top: 8px;
+  color: var(--muted);
+}
+
+.tick {
+  display: block;
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 12px;
+  border-radius: 50%;
+  background: var(--success-soft)
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M5.5 10.5l3 3 6-7' fill='none' stroke='%2322c55e' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E")
+    center / 32px no-repeat;
+}
+
+.advanced {
+  margin-top: 8px;
+  padding: 0 16px 4px;
+  border-radius: 24px;
+  box-shadow: 0 0 0 1px var(--ring);
+}
+
+.advanced[open] {
+  padding-bottom: 16px;
+}
+
+summary {
+  display: flex;
+  align-items: center;
+  min-height: 48px;
+  color: var(--muted);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+}
+
+summary::-webkit-details-marker {
+  display: none;
+}
+
+summary::after {
+  content: "";
+  width: 7px;
+  height: 7px;
+  margin-left: auto;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg) translateY(-2px);
+}
+
+.advanced[open] summary::after {
+  transform: rotate(-135deg) translateY(-2px);
+}
+
+.facts {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 14px;
+}
+
+.facts dt {
+  color: var(--muted);
+}
+
+.facts dd {
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.confirm {
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 16px;
+  background: var(--danger-soft);
+  font-size: 14px;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

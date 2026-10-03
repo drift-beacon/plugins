@@ -1,0 +1,14 @@
+@import "tailwindcss";
+@import "../../../theme.css";
+@plugin './hero.ts';
+@source '../../node_modules/@heroui/theme/dist/**/*.{js,ts,jsx,tsx}';
+@custom-variant dark (&:is(.dark *));
+
+@layer base {
+  * {
+    @apply border-divider outline-focus/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
