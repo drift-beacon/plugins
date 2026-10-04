@@ -482,7 +482,10 @@ class Attempt {
 
   /** A hub problem: on the setup code's field when the hub came from one. */
   void failHub(Field field, const char* format) {
-    std::snprintf(message_, sizeof message_, format, plan_.hub.host, static_cast<unsigned>(plan_.hub.port));
+    // A host can be longer than the message has room for: the message is cut there, which is fine for a hint.
+    const int written =
+        std::snprintf(message_, sizeof message_, format, plan_.hub.host, static_cast<unsigned>(plan_.hub.port));
+    if (written < 0) message_[0] = '\0';
     const bool onCode = plan_.fromCode && (field != Field::Key || plan_.keyInCode);
     field_ = onCode ? Field::Code : field;
     phase_ = Phase::Failed;

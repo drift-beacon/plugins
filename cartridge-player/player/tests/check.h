@@ -15,6 +15,13 @@ inline void fail(const char* file, int line, const char* what) {
   ++failures;
 }
 
+/** A text that isn't the expected one. Printed directly: no buffer for a long text to be cut by. */
+inline void failText(const char* file, int line, const char* what, const char* actual, const char* expected) {
+  std::fprintf(stderr, "%s:%d: [%s] %s is \"%s\", expected \"%s\"\n", file, line, current, what,
+               actual ? actual : "(null)", expected);
+  ++failures;
+}
+
 /** Runs one named test: the name says which rule of the player's it protects. */
 template <class Test>
 void run(const char* name, Test&& test) {
@@ -34,9 +41,6 @@ inline int result() { return failures == 0 ? 0 : 1; }
     const char* checkActual_ = (actual);                                                           \
     const char* checkExpected_ = (expected);                                                       \
     if (!checkActual_ || std::strcmp(checkActual_, checkExpected_) != 0) {                         \
-      char checkLine_[600];                                                                        \
-      std::snprintf(checkLine_, sizeof checkLine_, "%s is \"%s\", expected \"%s\"", #actual,      \
-                    checkActual_ ? checkActual_ : "(null)", checkExpected_);                       \
-      check::fail(__FILE__, __LINE__, checkLine_);                                                 \
+      check::failText(__FILE__, __LINE__, #actual, checkActual_, checkExpected_);                  \
     }                                                                                              \
   } while (false)

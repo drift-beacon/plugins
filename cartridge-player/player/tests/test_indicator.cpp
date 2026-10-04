@@ -18,7 +18,8 @@ unsigned hueOf(const Rgb& light) {
   if (light.r && light.g) return AMBER;
   if (light.r) return RED;
   if (light.g) return GREEN;
-  return light.b ? BLUE : 0;
+  if (light.b) return BLUE;
+  return 0;
 }
 
 /** How a light moves: not at all, smoothly (breathing), or in steps (blinking). */
