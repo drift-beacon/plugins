@@ -100,7 +100,7 @@ From the root, `pnpm -r build` builds every plugin. Automation that parses pack 
 
 ## Releases
 
-Drift Beacon offers the `version` in each `manifest.json` on `main` and installs the GitHub release tagged `<id>-<version>`, whose `<id>.zip` must hold an equal manifest. To release a plugin, bump `version` in its manifest and push to `main`.
+`catalogue.json` at the top names this catalogue and lists its plugin folders: Drift Beacon reads only those, on GitHub and as a local development folder, so a new plugin isn't offered (or released) until it is listed there. Drift Beacon offers the `version` in each `manifest.json` on `main` and installs the GitHub release tagged `<id>-<version>`, whose `<id>.zip` must hold an equal manifest. To release a plugin, bump `version` in its manifest and push to `main`.
 
 - `.github/workflows/release.yml` runs on every push to `main` (and from **Run workflow**). It publishes each advertised version that has no release yet, one job per plugin: its tests, `dbplugin pack`, then `gh release create` with the tag at that commit. Only the newest commit of `main` publishes.
 - `.github/workflows/validate.yml` runs on pull requests and `main`: the script tests, `plugin-release.mjs check`, every plugin's tests and a pack of every plugin.

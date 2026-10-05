@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -7,26 +7,28 @@ import { isDeepStrictEqual } from "node:util";
 
 const MAX_ARCHIVE_BYTES = 32 * 1024 * 1024;
 
-/** Every plugin this checkout advertises: the immediate child folders Drift Beacon reads a manifest from. */
+/** Every plugin this checkout advertises: the folders catalogue.json lists, which Drift Beacon reads a manifest from. */
 export function listPlugins(root) {
   const plugins = [];
-  const entries = readdirSync(root, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
-  for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name.startsWith(".") || entry.name === "node_modules") continue;
-    const file = path.join(root, entry.name, "manifest.json");
-    if (!existsSync(file)) continue;
-    if (!/^[a-zA-Z0-9_-]+$/.test(entry.name)) {
-      throw new Error(`Plugin folder names use only letters, digits, - and _: ${entry.name}`);
+  const catalogue = JSON.parse(readFileSync(path.join(root, "catalogue.json"), "utf8"));
+  if (typeof catalogue.name !== "string" || !catalogue.name.trim() || !Array.isArray(catalogue.plugins)) {
+    throw new Error('catalogue.json needs a "name" and a "plugins" list of folders');
+  }
+  for (const directory of catalogue.plugins) {
+    if (typeof directory !== "string" || !/^[a-zA-Z0-9_-]+$/.test(directory)) {
+      throw new Error(`Plugin folder names use only letters, digits, - and _: ${directory}`);
     }
+    const file = path.join(root, directory, "manifest.json");
+    if (!existsSync(file)) throw new Error(`catalogue.json lists ${directory}, which has no manifest.json`);
     const manifest = JSON.parse(readFileSync(file, "utf8"));
     if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(manifest.id) ||
         !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$/.test(manifest.version)) {
-      throw new Error(`${entry.name}/manifest.json needs a plugin ID and a stable semantic version`);
+      throw new Error(`${directory}/manifest.json needs a plugin ID and a stable semantic version`);
     }
     if (plugins.some((plugin) => plugin.manifest.id === manifest.id)) {
       throw new Error(`Two folders advertise the plugin ID ${manifest.id}`);
     }
-    plugins.push({ directory: entry.name, manifest, tag: `${manifest.id}-${manifest.version}` });
+    plugins.push({ directory, manifest, tag: `${manifest.id}-${manifest.version}` });
   }
   return plugins;
 }

@@ -1,0 +1,6 @@
+{
+  "name": "Drift Beacon Plugins",
+  "description": "An example set of plugins from Drift Beacon",
+  "author": { "name": "Drift Beacon", "url": "https://github.com/drift-beacon" },
+  "plugins": ["cartridge-player", "magic-cube", "nanoleaf"]
+}

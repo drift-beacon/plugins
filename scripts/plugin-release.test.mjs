@@ -16,9 +16,13 @@ function fixture(t) {
   const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), "plugin-release-")));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const manifest = { id: "magic-cube", version: "1.3.0" };
-  const add = (directory, value = manifest) => {
+  const listed = [];
+  /** A folder with a manifest, listed in catalogue.json unless `list` is false. */
+  const add = (directory, value = manifest, list = true) => {
     mkdirSync(path.join(root, directory), { recursive: true });
     writeFileSync(path.join(root, directory, "manifest.json"), JSON.stringify(value));
+    if (list) listed.push(directory);
+    writeFileSync(path.join(root, "catalogue.json"), JSON.stringify({ name: "Fixture", plugins: listed }));
   };
   add("cube");
   return { root, manifest, add };
@@ -91,9 +95,13 @@ test("rejects what a server wouldn't advertise: duplicate IDs, prereleases and u
     assert.throws(() => listPlugins(root), message);
   }
   const { root, add } = fixture(t);
-  add(".cache", { id: "hidden" });
-  add("node_modules", { id: "dependency" });
+  // A folder is a plugin only when catalogue.json lists it, whatever it holds.
+  add("scripts", { id: "stray", version: "1.0.0" }, false);
   assert.deepEqual(listPlugins(root).map((plugin) => plugin.directory), ["cube"]);
+  writeFileSync(path.join(root, "catalogue.json"), JSON.stringify({ name: "Fixture", plugins: ["cube", "gone"] }));
+  assert.throws(() => listPlugins(root), /gone, which has no manifest\.json/);
+  rmSync(path.join(root, "catalogue.json"));
+  assert.throws(() => listPlugins(root), /catalogue\.json/);
 });
 
 test("only publishes the selected package result and expected archive", (t) => {
