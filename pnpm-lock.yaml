@@ -183,8 +183,8 @@ importers:
         version: 19.2.0(react@19.2.0)
     devDependencies:
       '@drift-beacon/plugin':
-        specifier: ^0.2.5
-        version: 0.2.5(typescript@5.9.3)(vite@7.1.2(@types/node@25.9.8)(jiti@2.7.0)(lightningcss@1.32.0))
+        specifier: ^0.2.6
+        version: 0.2.6(typescript@5.9.3)(vite@7.1.2(@types/node@25.9.8)(jiti@2.7.0)(lightningcss@1.32.0))
       '@heroui/react':
         specifier: 2.8.3
         version: 2.8.3(@react-spectrum/provider@3.11.1(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(@types/react@19.2.2)(framer-motion@12.43.0(react-dom@19.2.0(react@19.2.0))(react@19.2.0))(react-dom@19.2.0(react@19.2.0))(react@19.2.0)(tailwindcss@4.3.3)
@@ -250,8 +250,8 @@ importers:
         version: 0.172.0
     devDependencies:
       '@drift-beacon/plugin':
-        specifier: ^0.2.5
-        version: 0.2.5(typescript@5.9.3)(vite@7.1.2(@types/node@25.9.8)(jiti@2.7.0)(lightningcss@1.32.0))
+        specifier: ^0.2.6
+        version: 0.2.6(typescript@5.9.3)(vite@7.1.2(@types/node@25.9.8)(jiti@2.7.0)(lightningcss@1.32.0))
       '@tailwindcss/vite':
         specifier: ^4.1.18
         version: 4.3.3(vite@7.1.2(@types/node@25.9.8)(jiti@2.7.0)(lightningcss@1.32.0))
@@ -302,8 +302,8 @@ importers:
         version: 19.2.0(react@19.2.0)
     devDependencies:
       '@drift-beacon/plugin':
-        specifier: ^0.2.5
-        version: 0.2.5(typescript@5.9.3)(vite@7.1.2(@types/node@25.9.8)(jiti@2.7.0)(lightningcss@1.32.0))
+        specifier: ^0.2.6
+        version: 0.2.6(typescript@5.9.3)(vite@7.1.2(@types/node@25.9.8)(jiti@2.7.0)(lightningcss@1.32.0))
       '@tailwindcss/vite':
         specifier: ^4.1.18
         version: 4.3.3(vite@7.1.2(@types/node@25.9.8)(jiti@2.7.0)(lightningcss@1.32.0))
@@ -436,8 +436,8 @@ packages:
     resolution: {integrity: sha512-Vj1jF3cPfxg7OAfoI7QnVKLoILlm2JF9pnVHrX8qx7AHMiYWT+NDAA7jChlNgRS4WTLc/fD1lXLmPixluj+3Gg==}
     engines: {node: '>=6.9.0'}
 
-  '@drift-beacon/plugin@0.2.5':
-    resolution: {integrity: sha512-ITFkiqLMs+NU91rrqEN352H6hiKansS0WnwEvICXUJccxlyTMStXOcoJVJxeFr20c+CQEsXt3n1ozIUIDMmQ0Q==}
+  '@drift-beacon/plugin@0.2.6':
+    resolution: {integrity: sha512-71+8CZeZoI9qmAwcOKWIPlW/w4gl+3UolGZHlu71UVGk1RKMJKj0/NFdmYYe60mhDOy2ejCslSThl62s9vgurA==}
     engines: {node: '>=22.13'}
     hasBin: true
     peerDependencies:
@@ -3186,7 +3186,7 @@ snapshots:
       '@babel/helper-string-parser': 7.29.7
       '@babel/helper-validator-identifier': 7.29.7
 
-  '@drift-beacon/plugin@0.2.5(typescript@5.9.3)(vite@7.1.2(@types/node@25.9.8)(jiti@2.7.0)(lightningcss@1.32.0))':
+  '@drift-beacon/plugin@0.2.6(typescript@5.9.3)(vite@7.1.2(@types/node@25.9.8)(jiti@2.7.0)(lightningcss@1.32.0))':
     dependencies:
       fflate: 0.8.3
     optionalDependencies:

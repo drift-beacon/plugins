@@ -7,4 +7,4 @@ allowBuilds:
   "@heroui/shared-utils": false
 
 minimumReleaseAgeExclude:
-  - '@drift-beacon/plugin@0.2.5'
+  - '@drift-beacon/plugin@0.2.6'

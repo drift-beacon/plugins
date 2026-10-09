@@ -18,7 +18,7 @@
     "react-dom": "19.2.0"
   },
   "devDependencies": {
-    "@drift-beacon/plugin": "^0.2.5",
+    "@drift-beacon/plugin": "^0.2.6",
     "@heroui/react": "2.8.3",
     "@tailwindcss/vite": "^4.1.18",
     "@types/node": "^25.3.0",
