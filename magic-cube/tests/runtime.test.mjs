@@ -27,7 +27,7 @@ function host(initial = {}) {
   exports.default.onStart(ctx);
   const stop = () => Promise.all(stops.map(fn => fn()));
   cleanups.push(stop);
-  return { data, commands, tracked, lit, send:(action,side)=>receive({payload:JSON.stringify({action,side})}),
+  return { data, commands, state, tracked, lit, send:(action,side)=>receive({payload:JSON.stringify({action,side})}),
     /** A settings write from the UI, as main hears it. */
     write(settings){ data.set('settings', settings); changed('settings'); },
     stop };
@@ -39,6 +39,29 @@ test('external preset selection restores the exact mode settings and Track', asy
   assert.deepEqual(h.data.get('settings').setup,setup); assert.equal(h.data.get('settings').autoStartEnabled,true);
   await h.commands.selectPreset({preset:null}); assert.equal(h.data.get('settings').activePresetId,null);
   assert.deepEqual(h.data.get('settings').setup,setup);
+});
+test('every state key the manifest binds to a choices list or a control is published when onStart returns, with nothing saved', () => {
+  const { provides } = JSON.parse(readFileSync(new URL('../manifest.json', import.meta.url), 'utf8'));
+  const bound = new Set([...Object.values(provides.choices ?? {}).map(list => list.state), ...Object.values(provides.controls ?? {}).map(control => control.value.state)]);
+  assert.ok(bound.size > 0, 'manifest.json binds no state key');
+  // Read before anything is awaited, so this is the state as onStart left it. Null and an empty list are values a
+  // caller can show; a key never set is unknown to it.
+  const h=host();
+  for (const key of bound) assert.notEqual(h.state.get(key), undefined, `state "${key}" is bound in manifest.json but not published in onStart`);
+});
+test('the published preset list and active preset follow a selection by id, a cleared one and the UI\'s own edits', async () => {
+  // The ids differ from the names: the preset control sends an option's value, which is the id, and nothing else.
+  const preset=(id,name,mode)=>({id,name,setup:blankSetup(mode),autoStartEnabled:false});
+  const deep={id:'p_1',name:'Deep work',mode:'duel'}, chores={id:'p_2',name:'Chores',mode:'roulette'};
+  const h=host({settings:{...emptySettings(),presets:[preset('p_1','Deep work','duel'),preset('p_2','Chores','roulette')]}});
+  assert.deepEqual(h.state.get('presets'),[deep,chores]); assert.equal(h.state.get('activePreset'),null);
+  // Main's own storage write does not come back through onChange, so the handler publishes what it selected.
+  await h.commands.selectPreset({preset:'p_2'}); assert.deepEqual(h.state.get('activePreset'),chores);
+  await h.commands.selectPreset({preset:null}); assert.equal(h.state.get('activePreset'),null);
+  // The UI loads a preset, then deletes it: main hears each write and both keys follow.
+  h.write({...h.data.get('settings'),activePresetId:'p_1'}); assert.deepEqual(h.state.get('activePreset'),deep);
+  h.write({...h.data.get('settings'),presets:h.data.get('settings').presets.filter(item=>item.id!=='p_1'),activePresetId:null});
+  assert.deepEqual(h.state.get('presets'),[chores]); assert.equal(h.state.get('activePreset'),null);
 });
 test('hardware roulette honors exclusions and associates the actual tracking session', async () => {
   const setup=blankSetup('roulette'); setup.roulette='work'; setup.rouletteOff={work:['excluded']};

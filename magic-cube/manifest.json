@@ -2,7 +2,7 @@
   "id": "magic-cube",
   "name": "Magic Cube",
   "icon": "icon.png",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "apiVersion": "0.2",
   "description": "Use Aqrara Magic Cube to roll activities",
   "author": {
@@ -23,6 +23,15 @@
     "nanoleaf": "^0.3.0"
   },
   "provides": {
+    "choices": {
+      "preset": {
+        "title": "Preset",
+        "state": "presets",
+        "value": "id",
+        "label": "name",
+        "detail": "mode"
+      }
+    },
     "commands": {
       "selectPreset": {
         "title": "Select preset",
@@ -35,6 +44,7 @@
                 "string",
                 "null"
               ],
+              "choices": "preset",
               "description": "A preset's name or id; null clears the active preset"
             }
           },
@@ -63,6 +73,22 @@
             "name"
           ]
         }
+      }
+    },
+    "controls": {
+      "preset": {
+        "kind": "select",
+        "title": "Preset",
+        "icon": "mdi:cube-outline",
+        "value": {
+          "state": "activePreset",
+          "path": "id"
+        },
+        "set": {
+          "command": "selectPreset",
+          "field": "preset"
+        },
+        "none": "No preset"
       }
     },
     "events": {
