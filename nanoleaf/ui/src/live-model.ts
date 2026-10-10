@@ -1,4 +1,4 @@
-import type { MainApi, PluginPeer, PluginStatus, UiContext } from "@drift-beacon/plugin/ui";
+import type { MainApi, PluginPeerOf, PluginStatus, UiContext } from "@drift-beacon/plugin/ui";
 import { useEffect, useMemo, useState } from "react";
 import { readController, readLayout, readOrder, readSettings, sameLayout } from "../../shared/storage.ts";
 import {
@@ -94,7 +94,7 @@ export function mainStatusOf(
 const statusKey = (status: PluginStatus | undefined) => (status ? `${status.state}\n${status.reason ?? ""}` : "");
 
 /** Its own peer, or null when this Drift Beacon doesn't share plugins with UIs (then `resume` can't run). */
-function selfOf(ctx: UiContext): PluginPeer | null {
+function selfOf(ctx: UiContext): PluginPeerOf<"nanoleaf"> | null {
   try {
     return ctx.plugins.self;
   } catch {

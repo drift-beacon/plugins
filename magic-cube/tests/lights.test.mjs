@@ -53,7 +53,7 @@ function rig({ answer } = {}) {
     });
   };
   const lights = createLights({
-    command, now: () => now,
+    nanoleaf: { command }, now: () => now,
     log: { info: (...args) => logs.push(['info', ...args]), warn: (...args) => logs.push(['warn', ...args]) },
     setTimeout: (fn, ms) => (timer = { fn, at: now + ms }), clearTimeout: id => { if (timer === id) timer = null; },
   });

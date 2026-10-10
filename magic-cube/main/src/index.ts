@@ -18,7 +18,8 @@ export default definePlugin({
     // One instance per user and workspace, so the cube's state lives here, not at module scope.
     let state: CubeStatusState["state"] = "idle";
     const lights = createLights({
-      command: (name, input) => ctx.plugins.get(NANOLEAF).command(name, input, { timeoutMs: LIGHTS_TIMEOUT_MS }),
+      nanoleaf: ctx.plugins.get("nanoleaf"),
+      timeoutMs: LIGHTS_TIMEOUT_MS,
       log: ctx.log,
     });
     /** The wall follows the cube: a pulse while held, a shuffle while shaken, nothing when it is put down. */
@@ -175,7 +176,6 @@ function recordRoll(ctx: Context, side: number): string | null {
 }
 
 /** The Nanoleaf plugin (manifest.json `uses`), and how long one of its commands may take. */
-const NANOLEAF = "nanoleaf";
 const LIGHTS_TIMEOUT_MS = 3000;
 
 const lightsOn = (ctx: Context) => (ctx.storage.get<CubeSettings>("settings") ?? emptySettings()).lightNanoleaf !== false;

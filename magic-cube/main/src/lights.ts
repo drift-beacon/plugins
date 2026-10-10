@@ -5,24 +5,22 @@
  * Nothing here throws: the lights are a nicety, and a Nanoleaf plugin that isn't there is not an error.
  */
 
-/** What the wall should show: `pulse` and `shuffle` hold it until let go, `reveal` plays once and lets go by itself. */
-export interface LightEffect {
-  readonly type: 'pulse' | 'shuffle' | 'reveal';
-  /** CSS colours, at least one. */
-  readonly colors: readonly string[];
-  /** `reveal`: the colour it ends on. */
-  readonly color?: string;
-}
+import type { MainPluginPeerOf, PluginPeers } from '@drift-beacon/plugin';
 
-/** What `takeControl` answers, as far as the cube reads it. */
-interface TakeAnswer {
-  readonly granted?: boolean;
-  readonly leaseId?: string | null;
-}
+/** The Nanoleaf plugin, typed from the copy of its manifest in `peers/nanoleaf.json` (`dbplugin peers add ../nanoleaf`). */
+type Nanoleaf = MainPluginPeerOf<'nanoleaf'>;
+
+/**
+ * What the wall should show, as `takeControl` takes it: `pulse` and `shuffle` hold it until let go, `reveal` plays once
+ * and lets go by itself. `colors` are CSS colours, at least one; `color` is the one a reveal ends on.
+ */
+export type LightEffect = PluginPeers['nanoleaf']['commands']['takeControl']['input']['effect'];
 
 export interface LightsOptions {
-  /** Runs one of the Nanoleaf plugin's commands. */
-  readonly command: (name: string, input: Record<string, unknown>) => Promise<unknown>;
+  /** The Nanoleaf plugin, of which only its commands are used. */
+  readonly nanoleaf: Pick<Nanoleaf, 'command'>;
+  /** How long each command may take. */
+  readonly timeoutMs?: number;
   readonly log: { info(...args: unknown[]): void; warn(...args: unknown[]): void };
   readonly now?: () => number;
   readonly setTimeout?: (fn: () => void, ms: number) => unknown;
@@ -58,6 +56,7 @@ export function createLights(options: LightsOptions): Lights {
   const now = options.now ?? Date.now;
   const later = options.setTimeout ?? ((fn, ms) => setTimeout(fn, ms));
   const cancel = options.clearTimeout ?? (id => clearTimeout(id as ReturnType<typeof setTimeout>));
+  const timeout = options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs };
 
   /** The latest wish: an effect to show, or null to hold nothing. `sent` is what the wall was last asked for. */
   let wanted: LightEffect | null = null;
@@ -95,12 +94,13 @@ export function createLights(options: LightsOptions): Lights {
     // One id per wish, so asking again after a lost answer can't play a reveal twice or renew twice.
     const requestId = `${now().toString(36)}-${++requests}`;
     const input = { effect: { type: effect.type, colors: [...effect.colors], ...(effect.color ? { color: effect.color } : {}) }, ttlMs: LEASE_MS, requestId };
-    let answer: TakeAnswer | undefined;
+    const ask = () => options.nanoleaf.command('takeControl', input, timeout);
+    let answer: Awaited<ReturnType<typeof ask>>;
     try {
-      try { answer = (await options.command('takeControl', input)) as TakeAnswer; }
+      try { answer = await ask(); }
       catch (error) {
         if (codeOf(error) !== 'timeout') throw error;
-        answer = (await options.command('takeControl', input)) as TakeAnswer;
+        answer = await ask();
       }
     } catch (error) {
       // Unanswered: it may have run, so there may be something to let go of.
@@ -117,7 +117,7 @@ export function createLights(options: LightsOptions): Lights {
     const held = leaseId;
     mayHold = false;
     leaseId = null;
-    try { await options.command('releaseControl', held ? { leaseId: held } : {}); }
+    try { await options.nanoleaf.command('releaseControl', held ? { leaseId: held } : {}, timeout); }
     catch (error) { failed('release', error); }
   }
 

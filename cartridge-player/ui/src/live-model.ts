@@ -1,4 +1,4 @@
-import type { PluginPeer, PluginStatus, UiContext } from "@drift-beacon/plugin/ui";
+import type { PluginPeerOf, PluginStatus, UiContext } from "@drift-beacon/plugin/ui";
 import { useEffect, useMemo, useState } from "react";
 import type { PresenceState } from "../../shared/state.ts";
 import { readMappings, readPlayerRecord, STORAGE_KEYS } from "../../shared/storage.ts";
@@ -12,7 +12,7 @@ import { readPresence } from "./view/presence.ts";
 import { type ActivityView, byId, type CategoryView, type LiveSession } from "./view/types.ts";
 
 /** Its own peer, or null when this Drift Beacon doesn't share plugin status with UIs. */
-function selfOf(ctx: UiContext): PluginPeer | null {
+function selfOf(ctx: UiContext): PluginPeerOf<"cartridge-player"> | null {
   try {
     return ctx.plugins.self;
   } catch {
