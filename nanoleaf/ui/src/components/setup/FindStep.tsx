@@ -142,7 +142,7 @@ interface FindStepProps {
 
 /**
  * Step 1: find the controller. Discovery starts at once and the radar sweeps while it listens; what answers lands
- * as cards. Typing an address always works too (and is the only way from inside the Home Assistant add-on). A search
+ * as cards. Typing an address always works too (and is the only way when the controller is on another network). A search
  * that is replaced or left behind is given up in main too, and one that failed runs again by itself once main is
  * back in touch.
  */
@@ -329,8 +329,8 @@ export function FindStep({ onPick, initialAddress, found, onFound }: FindStepPro
       <p className="flex gap-2 text-default-400 text-xs leading-relaxed">
         <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
         <span>
-          Running Drift Beacon as a Home Assistant add-on? Discovery can't see your network from inside it, so enter the
-          controller's address: your router's device list or the Nanoleaf app's device info shows it.
+          Controller not showing up? It may be on another network than your Drift Beacon server. Enter its address:
+          your router's device list or the Nanoleaf app's device info shows it.
         </span>
       </p>
     </div>

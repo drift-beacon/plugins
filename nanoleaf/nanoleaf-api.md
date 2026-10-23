@@ -6,7 +6,7 @@ Each fact is tagged when it doesn't come straight from the official doc: **[code
 
 ## 1. Discovery
 
-Neither mDNS nor SSDP crosses VLANs, and the Home Assistant add-on runs on a bridge network that sees no multicast at all. Manual IP entry must always work.
+Neither mDNS nor SSDP crosses VLANs, so manual IP entry must always work. The Home Assistant app used to run on the Supervisor's `hassio` bridge network, which heard the LAN's mDNS (repeated onto it by the Supervisor) but couldn't send a query out, so discovery found nothing there. The app now runs on the host network, where discovery works directly, and from SDK 0.2.11 the mDNS half goes through the hub (§1.1).
 
 ### 1.1 mDNS (DNS-SD)
 
@@ -18,7 +18,8 @@ Neither mDNS nor SSDP crosses VLANs, and the Home Assistant add-on runs on a bri
   - `id`: a random device ID that changes on factory reset. A reset also removes every API token.
 - Controllers advertise IPv4 and IPv6. Since the Thread border-router firmware (8.5.2) this includes link-local `fe80::` addresses, and openHAB saw a device flip between them [community]. **Prefer the A record.**
 - `_nanoleafms._tcp` is advertised too, but its port isn't the OpenAPI's [code].
-- **How the plugin asks.** It sends one query from an ephemeral port, never binding 5353, which the OS responder owns. The query is a PTR question for `_nanoleafapi._tcp.local` with the unicast-response (QU) bit set, sent to `224.0.0.251:5353`.
+- **Through the hub (SDK 0.2.11).** On a hub that has `ctx.discovery.mdns`, the plugin browses `_nanoleafapi._tcp` through it: the hub sends the same kind of legacy-unicast query from the network interface it uses itself, and hands back each instance with its SRV, TXT and A records folded in. The plugin uses its own query below when the hub has no `ctx.discovery` or its browse fails (`unavailable`, for example no network interface to ask on).
+- **How the plugin asks by itself.** It sends one query from an ephemeral port, never binding 5353, which the OS responder owns. The query is a PTR question for `_nanoleafapi._tcp.local` with the unicast-response (QU) bit set, sent to `224.0.0.251:5353`.
   - A query whose source port isn't 5353 is a "legacy unicast" query (RFC 6762 §6.7). Responders must answer by unicast to that port, repeating the query ID and question.
   - DNS-SD responders normally add SRV, TXT and A records to a PTR answer. If one sends the PTR alone, ask for the instance's SRV and TXT. If there's no A record, the sender's address is the controller's.
 

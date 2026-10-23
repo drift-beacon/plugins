@@ -21,4 +21,4 @@ Lights up Nanoleaf **Shapes** panels (Hexagons, Triangles, Mini Triangles) in th
 1. Open the plugin and pick your controller, or enter its IP address.
 2. Hold the controller's power button for 5–7 seconds, until the lights flash. The plugin pairs.
 
-On the Home Assistant add-on the plugin can't find controllers by itself: enter the controller's IP address, and reserve that address in your router.
+If your controller doesn't show up (it's on another network than your Drift Beacon server, say), enter its IP address, and reserve that address in your router.

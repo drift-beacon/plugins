@@ -21,7 +21,7 @@ import { createOwner } from "./claims.ts";
 import { Controller, type ControllerTimings } from "./controller.ts";
 import { createDirector, type Director, type DirectorTimings } from "./director.ts";
 import { assertLanHost, type Lookup } from "./lan.ts";
-import { discover } from "./nanoleaf/discovery.ts";
+import { discover, hubMdnsOf } from "./nanoleaf/discovery.ts";
 import { EventStream, type Touch } from "./nanoleaf/events.ts";
 import { isTransient, NanoleafClient, NanoleafError } from "./nanoleaf/http.ts";
 import { ExtControlStream } from "./nanoleaf/stream.ts";
@@ -39,10 +39,13 @@ export interface NanoleafPluginOptions {
   readonly lookup?: Lookup;
   /**
    * Looks for controllers when the paired one stopped answering at its address. Default: SSDP and mDNS for
-   * `SEARCH_MS` (discovery.ts); it resolves early when `signal` aborts.
+   * `SEARCH_MS` (discovery.ts, through the hub's mDNS when it has one); it resolves early when `signal` aborts.
    */
   readonly discover?: (signal: AbortSignal) => Promise<readonly FoundController[]>;
 }
+
+/** Discovery for this instance (discovery.ts): listens for `listenMs`, or until `signal` aborts. */
+type Find = (listenMs: number, signal: AbortSignal) => Promise<FoundController[]>;
 
 /** A `discover` request stops listening this long before its deadline, to answer in time. */
 const DISCOVER_MARGIN_MS = 500;
@@ -72,6 +75,12 @@ export function startNanoleaf(ctx: MainContext, options: NanoleafPluginOptions =
   let controller: Controller | null = null;
   // Only a development build may connect to the server's own loopback addresses (the emulator).
   const allowLoopback = ctx.plugin.id === DEVELOPMENT_ID;
+  // Discovery browses mDNS through the hub (`ctx.discovery.mdns`, SDK 0.2.11) when this Drift Beacon has it, and with
+  // its own query otherwise. `said` holds what it has told this instance's console once.
+  const mdns = hubMdnsOf(ctx);
+  const said = new Set<string>();
+  const find: Find = (listenMs, signal) =>
+    discover({ timeoutMs: listenMs, signal, mdns, said, log: (message, error) => log.info(message, error) });
 
   const director = createDirector({
     userId: ctx.user.id,
@@ -103,9 +112,7 @@ export function startNanoleaf(ctx: MainContext, options: NanoleafPluginOptions =
     probe: (host, port, signal) => NanoleafClient.probe(host, port, { signal }),
     requestToken: (host, port, signal) => NanoleafClient.requestToken(host, port, signal),
     openEvents: (eventOptions) => new EventStream(eventOptions),
-    discover:
-      options.discover ??
-      ((signal) => discover({ timeoutMs: SEARCH_MS, signal, log: (message, error) => log.info(message, error) })),
+    discover: options.discover ?? ((signal) => find(SEARCH_MS, signal)),
     publish: (info) => ctx.state.set("connection", info),
     onLink: (link) => director.setLink(link),
     onLayout: () => director.update(),
@@ -116,7 +123,7 @@ export function startNanoleaf(ctx: MainContext, options: NanoleafPluginOptions =
   });
   controller = wired;
 
-  registerRequests(ctx, wired, director);
+  registerRequests(ctx, wired, director, find);
   ctx.commands.handle("resume", () => {
     director.resume();
   });
@@ -163,7 +170,7 @@ export function holderOf(caller: CommandCaller): string {
  * is a Home Assistant action or reachable from another plugin. Inputs are checked against shared/ui-channel.ts before
  * a handler runs. Device errors become `PluginError`s the interface can explain.
  */
-function registerRequests(ctx: MainContext, controller: Controller, director: Director): void {
+function registerRequests(ctx: MainContext, controller: Controller, director: Director, find: Find): void {
   const { ui, log } = ctx;
   /**
    * Tells open copies something. A post that can't be sent (the instance is stopping) is logged, not worth failing the
@@ -182,11 +189,7 @@ function registerRequests(ctx: MainContext, controller: Controller, director: Di
     async (input, meta) => {
       const budget = meta.deadline - Date.now() - DISCOVER_MARGIN_MS;
       const timeoutMs = Math.max(500, Math.min(input.timeoutMs ?? 2500, budget));
-      const found = await discover({
-        timeoutMs,
-        signal: meta.signal,
-        log: (message, error) => log.info(message, error),
-      });
+      const found = await find(timeoutMs, meta.signal);
       return {
         controllers: found.map(({ host, port, name, model, id, source }) => ({ host, port, name, model, id, source })),
       };

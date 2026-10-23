@@ -1,7 +1,10 @@
 /**
- * Finds controllers on the LAN (nanoleaf-api.md §1): an SSDP M-SEARCH and a one-shot legacy-unicast mDNS query, both
- * from ephemeral ports so nothing ever binds 1900 or 5353 (the OS responder owns 5353, and a fixed port left open
- * breaks the next start in the shared host). The parsers are pure and exported for the tests and the emulator.
+ * Finds controllers on the LAN (nanoleaf-api.md §1): an SSDP M-SEARCH and an mDNS browse. The browse goes through the
+ * hub (`ctx.discovery.mdns`, SDK 0.2.11) when it has one, which asks from the network interface the hub uses itself;
+ * otherwise, or when the hub's is unavailable, it is a one-shot legacy-unicast mDNS query of this file's own. Both
+ * sockets here use ephemeral ports so nothing ever binds 1900 or 5353 (the OS responder owns 5353, and a fixed port
+ * left open breaks the next start in the shared host). The parsers are pure and exported for the tests and the
+ * emulator.
  */
 import { createSocket as createDgramSocket, type Socket } from "node:dgram";
 import { API_PORT } from "../../../shared/protocol.ts";
@@ -12,8 +15,10 @@ export const SSDP_ADDRESS = "239.255.255.250";
 export const SSDP_PORT = 1900;
 export const MDNS_ADDRESS = "224.0.0.251";
 export const MDNS_PORT = 5353;
-/** The DNS-SD service Nanoleaf controllers advertise. */
-export const MDNS_SERVICE = "_nanoleafapi._tcp.local";
+/** The DNS-SD service type Nanoleaf controllers advertise, as the hub's browse takes it (without `.local`). */
+export const MDNS_SERVICE_TYPE = "_nanoleafapi._tcp";
+/** The same service as a DNS name, for this file's own query. */
+export const MDNS_SERVICE = `${MDNS_SERVICE_TYPE}.local`;
 /** M-SEARCH targets: the doc's two, plus the one Shapes advertise. */
 export const SSDP_SEARCH_TARGETS: readonly string[] = ["ssdp:all", "nanoleaf:nl42", "nanoleaf_aurora:light"];
 
@@ -24,6 +29,58 @@ export const DNS_TXT = 16;
 export const DNS_AAAA = 28;
 export const DNS_SRV = 33;
 
+/*
+ * The part of the SDK's `ctx.discovery.mdns` that discovery uses, written out here with the SDK's names (`MdnsApi`,
+ * `MdnsService`, `MdnsOptions` in @drift-beacon/plugin 0.2.11) and kept in step with them. Copies, because the SDK this
+ * repo builds against (and CI with it) has no `discovery` on `MainContext` yet. Once 0.2.11 is published and
+ * package.json requires it, import the SDK's own types instead and read `ctx.discovery?.mdns` directly in place of
+ * `hubMdnsOf`.
+ */
+
+/** As the SDK's `MdnsOptions`. */
+export interface MdnsOptions {
+  /** How long to listen: 2,000 ms by default, at most 10,000. */
+  readonly timeoutMs?: number;
+  /** Aborting resolves the call early with what it has heard so far. */
+  readonly signal?: AbortSignal;
+}
+
+/** As the SDK's `MdnsService`: what a device said, so the addresses are hints (pairing authenticates the device). */
+export interface MdnsService {
+  /** The instance's own name, unescaped: `Shapes AD82`. */
+  readonly instance: string;
+  readonly serviceType: string;
+  /** The host its SRV record names: `Shapes-AD82.local`. */
+  readonly host: string;
+  /** That host's IPv4 addresses; empty when no A record came in time. */
+  readonly addresses: readonly string[];
+  readonly port: number;
+  /** TXT keys in lowercase, with their values. */
+  readonly txt: Readonly<Record<string, string>>;
+  /** The address of the device that answered. */
+  readonly from: string;
+}
+
+/**
+ * As the SDK's `MdnsApi`, browse only. It rejects with a `PluginError` (read `code`): `unavailable` when the hub has no
+ * network interface to ask on or a limit was reached, `invalid` for arguments it can't send, `stopped` when the
+ * instance stops (at once, not at the deadline).
+ */
+export interface MdnsApi {
+  browse(serviceType: string, options?: MdnsOptions): Promise<readonly MdnsService[]>;
+}
+
+/** The hub's mDNS, `ctx.discovery.mdns`, or null on a Drift Beacon older than SDK 0.2.11, which has none. */
+export function hubMdnsOf(ctx: object): MdnsApi | null {
+  const mdns = (ctx as { readonly discovery?: { readonly mdns?: unknown } }).discovery?.mdns;
+  return typeof mdns === "object" && mdns !== null && typeof (mdns as Partial<MdnsApi>).browse === "function"
+    ? (mdns as MdnsApi)
+    : null;
+}
+
+/** How long a hub browse may take to answer once this call's own time is up (an IPC round trip, normally). */
+const HUB_BROWSE_GRACE_MS = 250;
+
 /** How long to listen, and injectable sockets, signal and logger. */
 export interface DiscoverOptions {
   /** How long to listen for answers. Default 2500 ms. */
@@ -33,6 +90,17 @@ export interface DiscoverOptions {
   /** Ends the listening early (for example when the plugin stops); what was found so far is returned. */
   readonly signal?: AbortSignal;
   readonly log?: (message: string, error?: unknown) => void;
+  /**
+   * The hub's mDNS (`hubMdnsOf(ctx)`): the mDNS half browses through it in place of the own query. When it rejects
+   * `stopped` the instance is stopping, and the whole call ends at once with nothing. Any other rejection
+   * (`unavailable`, say) falls back to the own query for the rest of this call. Absent or null: the own query.
+   */
+  readonly mdns?: MdnsApi | null;
+  /**
+   * What this instance has already said once (index.ts keeps one per instance): the fallback to the own query, and
+   * each controller SSDP found that the hub's mDNS didn't. Without it, every call says them again.
+   */
+  readonly said?: Set<string>;
 }
 
 /** A DNS question: `unicastResponse` is the mDNS QU bit (the top bit of the class). */
@@ -72,19 +140,40 @@ export interface DnsMessage {
 
 /**
  * Listens for controllers for `timeoutMs` with SSDP and mDNS together, then merges the answers by host (mDNS data
- * wins, SSDP fills gaps). Never rejects: a network that can't multicast simply finds nothing. Every socket and timer
- * is closed before it resolves, including when `signal` aborts.
+ * wins, SSDP fills gaps). mDNS goes through the hub when `options.mdns` is given, else (or when the hub's is
+ * unavailable) through this file's own query. Never rejects: a network that can't multicast simply finds nothing, and
+ * when the hub says the instance is stopping it ends at once with nothing. Every socket and timer is closed before it
+ * resolves, including when `signal` aborts.
+ *
+ * When a full-length call found a controller by SSDP that the hub's browse didn't, it says so once (`log`). That is
+ * the evidence that would justify the hub asking by multicast too (a QM question), rather than legacy unicast only.
  */
 export async function discover(options: DiscoverOptions = {}): Promise<FoundController[]> {
   const timeoutMs = options.timeoutMs ?? 2500;
   const make = options.createSocket ?? (() => createDgramSocket("udp4"));
   const log = options.log;
+  const said = options.said ?? new Set<string>();
+  const sayOnce = (key: string, message: string, error?: unknown) => {
+    if (said.has(key)) return;
+    said.add(key);
+    log?.(message, error);
+  };
   const sockets: Socket[] = [];
   const timers: ReturnType<typeof setTimeout>[] = [];
   const ssdp = new Map<string, FoundController>();
   const mdnsRecords = new Map<string, DnsRecord[]>();
   const asked = new Set<string>();
   const decoder = new TextDecoder();
+  // Listening ends at the deadline, when `signal` aborts, or when the hub says the instance is stopping.
+  let listening = true;
+  let stopping = false;
+  let endListening = () => {};
+  const listened = new Promise<void>((resolve) => {
+    endListening = () => {
+      listening = false;
+      resolve();
+    };
+  });
 
   const send = (socket: Socket, bytes: Uint8Array, port: number, address: string) => {
     try {
@@ -148,41 +237,84 @@ export async function discover(options: DiscoverOptions = {}): Promise<FoundCont
     },
   );
 
-  open(
-    "mdns",
-    (socket, message, from) => {
-      const parsed = parseDnsMessage(message);
-      if (!parsed.response) return;
-      const records = mdnsRecords.get(from) ?? [];
-      records.push(...parsed.records);
-      mdnsRecords.set(from, records);
-      // Some responders answer the PTR alone: ask once for each instance's SRV and TXT (its port, model and id).
-      for (const instance of instancesWithoutSrv(records)) {
-        const key = `${from} ${instance.toLowerCase()}`;
-        if (asked.has(key)) continue;
-        asked.add(key);
-        const questions = [
-          { name: instance, type: DNS_SRV },
-          { name: instance, type: DNS_TXT },
-        ];
-        send(socket, buildMdnsQuery(questions), MDNS_PORT, MDNS_ADDRESS);
-      }
-    },
-    (socket) => {
-      setTtl(socket, 255);
-      send(socket, buildMdnsQuery(), MDNS_PORT, MDNS_ADDRESS);
-    },
-  );
+  /** This file's own mDNS query, from an ephemeral socket. */
+  const ownMdns = () =>
+    open(
+      "mdns",
+      (socket, message, from) => {
+        const parsed = parseDnsMessage(message);
+        if (!parsed.response) return;
+        const records = mdnsRecords.get(from) ?? [];
+        records.push(...parsed.records);
+        mdnsRecords.set(from, records);
+        // Some responders answer the PTR alone: ask once for each instance's SRV and TXT (its port, model and id).
+        for (const instance of instancesWithoutSrv(records)) {
+          const key = `${from} ${instance.toLowerCase()}`;
+          if (asked.has(key)) continue;
+          asked.add(key);
+          const questions = [
+            { name: instance, type: DNS_SRV },
+            { name: instance, type: DNS_TXT },
+          ];
+          send(socket, buildMdnsQuery(questions), MDNS_PORT, MDNS_ADDRESS);
+        }
+      },
+      (socket) => {
+        setTtl(socket, 255);
+        send(socket, buildMdnsQuery(), MDNS_PORT, MDNS_ADDRESS);
+      },
+    );
 
   const signal = options.signal;
-  let stop = () => {};
-  await new Promise<void>((resolve) => {
-    stop = () => resolve();
-    timers.push(setTimeout(stop, timeoutMs));
-    if (signal?.aborted) stop();
-    else signal?.addEventListener("abort", stop, { once: true });
-  });
-  signal?.removeEventListener("abort", stop);
+  const hub = options.mdns ?? null;
+  // The hub's browse: what it found once it resolved (null until then, and when it isn't used or failed).
+  const browsed: { found: FoundController[] | null } = { found: null };
+  let browsing: Promise<void> = Promise.resolve();
+  // Ends the browse at this call's deadline, so it resolves at once with what the hub heard.
+  const deadline = new AbortController();
+  if (hub && !signal?.aborted) {
+    browsing = browseHub(hub, {
+      timeoutMs,
+      signal: signal ? AbortSignal.any([signal, deadline.signal]) : deadline.signal,
+    }).then(
+      (services) => {
+        browsed.found = services.flatMap((service) => {
+          const found = foundFromService(service);
+          return found ? [found] : [];
+        });
+      },
+      (error: unknown) => {
+        if (codeOf(error) === "stopped") {
+          // The instance is stopping: nothing found now would be used, and nothing should be asked any more.
+          stopping = true;
+          endListening();
+          return;
+        }
+        sayOnce(
+          "hub-mdns-fallback",
+          codeOf(error) === "unavailable"
+            ? "The hub's mDNS is unavailable; asking with the plugin's own mDNS query"
+            : "The hub's mDNS couldn't browse; asking with the plugin's own mDNS query",
+          error,
+        );
+        if (listening) ownMdns();
+      },
+    );
+  } else if (!hub) ownMdns();
+
+  timers.push(setTimeout(endListening, timeoutMs));
+  if (signal?.aborted) endListening();
+  else signal?.addEventListener("abort", endListening, { once: true });
+  await listened;
+  signal?.removeEventListener("abort", endListening);
+  const fullLength = !signal?.aborted;
+  if (hub && !stopping) {
+    deadline.abort();
+    await new Promise<void>((resolve) => {
+      timers.push(setTimeout(resolve, HUB_BROWSE_GRACE_MS));
+      void browsing.then(resolve);
+    });
+  }
   for (const timer of timers) clearTimeout(timer);
   for (const socket of sockets) {
     try {
@@ -191,8 +323,81 @@ export async function discover(options: DiscoverOptions = {}): Promise<FoundCont
       // Never bound, or already closed.
     }
   }
-  const mdns = [...mdnsRecords].flatMap(([from, records]) => resolveMdns(records, from));
-  return mergeFound(mdns, [...ssdp.values()]);
+  if (stopping) return [];
+  const viaHub = browsed.found;
+  const fromSsdp = [...ssdp.values()];
+  if (viaHub && fullLength) {
+    for (const found of ssdpOnly(fromSsdp, viaHub)) {
+      sayOnce(
+        `ssdp-only ${found.host.toLowerCase()}`,
+        `Found ${found.name ?? "a controller"} at ${found.host} by SSDP but not by the hub's mDNS`,
+      );
+    }
+    // ssdpOnly takes SSDP's nl-deviceid and the TXT id for one identifier. Say so if a controller's firmware ever
+    // reports two, so the address is then the only match.
+    const hubByHost = new Map(viaHub.map((found) => [found.host.toLowerCase(), found]));
+    for (const found of fromSsdp) {
+      const hub = hubByHost.get(found.host.toLowerCase());
+      if (hub?.id && found.id && hub.id.toLowerCase() !== found.id.toLowerCase()) {
+        sayOnce(
+          `id-differs ${found.host.toLowerCase()}`,
+          `${found.name ?? "The controller"} at ${found.host} has the id ${found.id} by SSDP and ${hub.id} by mDNS`,
+        );
+      }
+    }
+  }
+  const ownFound = [...mdnsRecords].flatMap(([from, records]) => resolveMdns(records, from));
+  return mergeFound([...(viaHub ?? []), ...ownFound], fromSsdp);
+}
+
+/** Calls the hub's browse; a synchronous throw becomes a rejection. */
+function browseHub(hub: MdnsApi, options: MdnsOptions): Promise<readonly MdnsService[]> {
+  try {
+    return Promise.resolve(hub.browse(MDNS_SERVICE_TYPE, options)).then((services) =>
+      Array.isArray(services) ? services : [],
+    );
+  } catch (error) {
+    return Promise.reject(error);
+  }
+}
+
+/** A rejection's `PluginError` code (read by name: `instanceof` differs between SDK copies). */
+function codeOf(error: unknown): unknown {
+  return typeof error === "object" && error !== null ? (error as { readonly code?: unknown }).code : undefined;
+}
+
+/**
+ * A controller from a service the hub's browse found, as `resolveMdns` makes one from records: the first IPv4
+ * address, else the address that answered; the SRV port, else the API's; the instance's name; `md` and `id` from the
+ * TXT. Null without an IPv4 address.
+ */
+export function foundFromService(service: MdnsService): FoundController | null {
+  // The hub hands over what a device said: read each field defensively, as the own parser reads a packet.
+  const text = (value: unknown) => (typeof value === "string" && value !== "" ? value : null);
+  const ipv4 = (value: unknown) => (typeof value === "string" && isIPv4(value) ? value : null);
+  const addresses: readonly unknown[] = Array.isArray(service.addresses) ? service.addresses : [];
+  const host = ipv4(addresses[0]) ?? ipv4(service.from);
+  if (host === null) return null;
+  const txt = typeof service.txt === "object" && service.txt !== null ? service.txt : {};
+  const entry = (key: string) => (Object.hasOwn(txt, key) ? text((txt as Record<string, unknown>)[key]) : null);
+  const port = service.port;
+  return {
+    host,
+    port: Number.isInteger(port) && port > 0 && port < 65536 ? port : API_PORT,
+    name: text(service.instance),
+    model: entry("md"),
+    id: entry("id"),
+    source: "mdns",
+  };
+}
+
+/** SSDP finds the hub's browse has no controller for: neither at the same address nor with the same id. */
+function ssdpOnly(ssdp: readonly FoundController[], hub: readonly FoundController[]): FoundController[] {
+  const hosts = new Set(hub.map((found) => found.host.toLowerCase()));
+  const ids = new Set(hub.flatMap((found) => (found.id ? [found.id.toLowerCase()] : [])));
+  return ssdp.filter(
+    (found) => !hosts.has(found.host.toLowerCase()) && !(found.id !== null && ids.has(found.id.toLowerCase())),
+  );
 }
 
 /** Merges results by host: mDNS first (its fields win), SSDP fills any null field. Sorted by name, then host. */
