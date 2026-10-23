@@ -251,7 +251,7 @@ function prefill() {
   }
   if (saved && saved.host) {
     $("host").value = saved.host;
-    $("port").value = String(saved.port || 9001);
+    $("port").value = String(saved.port || 9821);
     $("base").value = saved.base || "";
   }
   setManual(Boolean(saved && saved.host));
@@ -836,7 +836,7 @@ function forget() {
   ["ssid", "password", "code", "host", "base", "key"].forEach(function (id) {
     $(id).value = "";
   });
-  $("port").value = "9001";
+  $("port").value = "9821";
   show("exit", false);
   show("done", false);
   show("progress", false);

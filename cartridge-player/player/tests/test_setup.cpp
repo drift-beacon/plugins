@@ -17,7 +17,7 @@ Settings saved() {
   stored.ssid = "Home";
   stored.password = "hunter22";
   stored.host = "192.168.1.12";
-  stored.port = 9001;
+  stored.port = 9821;
   stored.base = "/api/plugins/x/api";
   stored.key = "db_savedkey123";
   return settingsFrom(stored);
@@ -28,16 +28,16 @@ ConnectForm manual() {
   form.ssid = "Home";
   form.password = "hunter22";
   form.host = "192.168.1.12";
-  form.port = "9001";
+  form.port = "9821";
   form.base = "/api/plugins/x/api";
   form.key = "db_typedkey456";
   return form;
 }
 
-// CP1- + base64url({"h":"10.0.0.2","p":9001,"b":"/api/plugins/x/api"}) and the same with "k":"db_incode789".
-const char* const CODE = "CP1-eyJoIjoiMTAuMC4wLjIiLCJwIjo5MDAxLCJiIjoiL2FwaS9wbHVnaW5zL3gvYXBpIn0";
+// CP1- + base64url({"h":"10.0.0.2","p":9821,"b":"/api/plugins/x/api"}) and the same with "k":"db_incode789".
+const char* const CODE = "CP1-eyJoIjoiMTAuMC4wLjIiLCJwIjo5ODIxLCJiIjoiL2FwaS9wbHVnaW5zL3gvYXBpIn0";
 const char* const CODE_WITH_KEY =
-    "CP1-eyJoIjoiMTAuMC4wLjIiLCJwIjo5MDAxLCJiIjoiL2FwaS9wbHVnaW5zL3gvYXBpIiwiayI6ImRiX2luY29kZTc4OSJ9";
+    "CP1-eyJoIjoiMTAuMC4wLjIiLCJwIjo5ODIxLCJiIjoiL2FwaS9wbHVnaW5zL3gvYXBpIiwiayI6ImRiX2luY29kZTc4OSJ9";
 
 Answer answer(const char* body) {
   Answer out;
@@ -113,9 +113,9 @@ int main() {
       CHECK(std::strstr(problem.message, "same hub address") != nullptr);
     }
     form = keeping();
-    form.port = "9002";
+    form.port = "9822";
     CHECK(!planConnect(form, saved(), plan, problem));
-    form.port = "9001";
+    form.port = "9821";
     form.base = "/api/plugins/y/api";
     CHECK(!planConnect(form, saved(), plan, problem));
     CHECK(!planConnect(form, Settings(), plan, problem));
@@ -184,7 +184,7 @@ int main() {
     stored.ssid = "Home";
     stored.password = "hunter22";
     stored.host = "192.168.1.12";
-    stored.port = 9001;
+    stored.port = 9821;
     stored.base = "/api/plugins/x/api";
     CHECK(!planConnect(keeping(), settingsFrom(stored), plan, problem));
     CHECK(problem.field == Field::Key);
@@ -381,7 +381,7 @@ int main() {
     }
     CHECK(attempt.probeFinished(-1, Answer(), 5000) == ProbeVerdict::Failed);
     CHECK(attempt.field() == Field::Host);
-    CHECK(std::strstr(attempt.message(), "192.168.1.12:9001") != nullptr);
+    CHECK(std::strstr(attempt.message(), "192.168.1.12:9821") != nullptr);
   });
 
   check::run("a restarting hub (503 with retry_ms) is waited for, up to 5 s a time", [] {
@@ -524,7 +524,7 @@ int main() {
 
   check::run("a posted form is read under the page's field names, each to its own field", [] {
     ConnectFields fields;
-    const char* const values[] = {"Home", "hunter22", "1", CODE, "192.168.1.12", "9001", "/api/plugins/x/api",
+    const char* const values[] = {"Home", "hunter22", "1", CODE, "192.168.1.12", "9821", "/api/plugins/x/api",
                                   "db_typedkey456", "1"};
     size_t count = 0;
     for (const char* name : CONNECT_FIELD_NAMES) CHECK(setConnectField(fields, name, values[count++]));
@@ -535,7 +535,7 @@ int main() {
     CHECK(form.keepPassword);
     CHECK_TEXT(form.code, CODE);
     CHECK_TEXT(form.host, "192.168.1.12");
-    CHECK_TEXT(form.port, "9001");
+    CHECK_TEXT(form.port, "9821");
     CHECK_TEXT(form.base, "/api/plugins/x/api");
     CHECK_TEXT(form.key, "db_typedkey456");
     CHECK(form.keepKey);
@@ -649,7 +649,7 @@ int main() {
     const std::string expected =
         std::string(R"({"device":{"id":"cp-a1b2c3","name":"Cartridge-A1B2","fw":")") + FIRMWARE_VERSION +
         R"(","reader":"ok"},"token":"8f3a","configured":true,)"
-        R"("saved":{"ssid":"Home","hasPassword":true,"host":"192.168.1.12","port":9001,)"
+        R"("saved":{"ssid":"Home","hasPassword":true,"host":"192.168.1.12","port":9821,)"
         R"("base":"/api/plugins/x/api","hasKey":true},)"
         R"("attempt":{"id":0,"phase":"idle","message":"","field":null,"ip":null,"ssid":null}})";
     CHECK_TEXT(body.c_str(), expected.c_str());

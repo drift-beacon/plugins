@@ -39,10 +39,10 @@ int main() {
   check::run("a code with a key gives host, port, base and key", [] {
     HubTarget hub;
     bool hasKey = false;
-    CHECK(decode(R"({"h":"192.168.1.12","p":9001,"b":"/api/plugins/x/api","k":"db_abcdefgh"})", hub, hasKey));
+    CHECK(decode(R"({"h":"192.168.1.12","p":9821,"b":"/api/plugins/x/api","k":"db_abcdefgh"})", hub, hasKey));
     CHECK(hasKey);
     CHECK_TEXT(hub.host, "192.168.1.12");
-    CHECK(hub.port == 9001);
+    CHECK(hub.port == 9821);
     CHECK_TEXT(hub.base, "/api/plugins/x/api");
     CHECK_TEXT(hub.key, "db_abcdefgh");
   });
@@ -68,27 +68,27 @@ int main() {
   check::run("a repeated field takes its last value, as JSON.parse does", [] {
     HubTarget hub;
     bool hasKey = false;
-    CHECK(decode(R"({"h":"bad host","h":"good","p":"9001","p":9001.0,"b":"/api/plugins/x/api"})", hub, hasKey));
+    CHECK(decode(R"({"h":"bad host","h":"good","p":"9821","p":9821.0,"b":"/api/plugins/x/api"})", hub, hasKey));
     CHECK_TEXT(hub.host, "good");
-    CHECK(!decode(R"({"h":"good","h":"bad host","p":9001,"b":"/api/plugins/x/api"})", hub, hasKey));
+    CHECK(!decode(R"({"h":"good","h":"bad host","p":9821,"b":"/api/plugins/x/api"})", hub, hasKey));
   });
 
   check::run("codes that break a rule are refused", [] {
     const char* const bad[] = {
-        R"({"h":"http://x","p":9001,"b":"/api/plugins/x/api"})",
+        R"({"h":"http://x","p":9821,"b":"/api/plugins/x/api"})",
         R"({"h":"x","p":0,"b":"/api/plugins/x/api"})",
         R"({"h":"x","p":65536,"b":"/api/plugins/x/api"})",
-        R"({"h":"x","p":9001.5,"b":"/api/plugins/x/api"})",
-        R"({"h":"x","p":"9001","b":"/api/plugins/x/api"})",
-        R"({"h":"x","p":9001,"b":"/api/plugins/x/api/player"})",
-        R"({"h":"x","p":9001,"b":"/api/plugins/../api"})",
-        R"({"h":"x","p":9001,"b":"/api/plugins/x/api","k":"short"})",
-        R"({"h":"x","p":9001,"b":"/api/plugins/x/api","k":null})",
-        R"({"h":"x","p":9001,"b":"/api/plugins/x/api","k":"has space"})",
-        R"({"h":"x\u0000y","p":9001,"b":"/api/plugins/x/api"})",
-        R"({"p":9001,"b":"/api/plugins/x/api"})",
-        R"([{"h":"x","p":9001,"b":"/api/plugins/x/api"}])",
-        R"({"h":"x","p":9001,"b":"/api/plugins/x/api"} x)",
+        R"({"h":"x","p":9821.5,"b":"/api/plugins/x/api"})",
+        R"({"h":"x","p":"9821","b":"/api/plugins/x/api"})",
+        R"({"h":"x","p":9821,"b":"/api/plugins/x/api/player"})",
+        R"({"h":"x","p":9821,"b":"/api/plugins/../api"})",
+        R"({"h":"x","p":9821,"b":"/api/plugins/x/api","k":"short"})",
+        R"({"h":"x","p":9821,"b":"/api/plugins/x/api","k":null})",
+        R"({"h":"x","p":9821,"b":"/api/plugins/x/api","k":"has space"})",
+        R"({"h":"x\u0000y","p":9821,"b":"/api/plugins/x/api"})",
+        R"({"p":9821,"b":"/api/plugins/x/api"})",
+        R"([{"h":"x","p":9821,"b":"/api/plugins/x/api"}])",
+        R"({"h":"x","p":9821,"b":"/api/plugins/x/api"} x)",
     };
     for (const char* json : bad) {
       HubTarget hub;

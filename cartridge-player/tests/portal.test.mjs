@@ -74,7 +74,7 @@ const DEVICE = { id: "cp-a1b2c3", name: "Cartridge-A1B2", fw: "2.0.0", reader: "
 const TOKEN = "8f3a5c1d";
 const IDLE = { id: 0, phase: "idle", message: "", field: null, ip: null, ssid: null };
 const SAVED = {
-  ssid: "Home", hasPassword: true, host: "192.168.1.12", port: 9001, base: "/api/plugins/cartridge-player/api", hasKey: true,
+  ssid: "Home", hasPassword: true, host: "192.168.1.12", port: 9821, base: "/api/plugins/cartridge-player/api", hasKey: true,
 };
 /** What the player holds behind SAVED's flags. */
 const SAVED_SECRETS = { ...SAVED, password: "home-password", key: "db_saved-key-0123" };
@@ -92,8 +92,8 @@ const KEY_NOT_WITH_TYPED =
   "Paste the API key, or leave the Wi-Fi password blank: the saved key isn't kept with a typed password";
 const FORGOTTEN = "The player started setup again. Check the settings and press Connect.";
 const SCAN_FAILED = "Couldn't get a new list of networks. Scan again, or choose Other network.";
-const CODE_WITH_KEY = encodeSetupCode({ host: "192.168.1.12", port: 9001, base: SAVED.base, key: "db_0123456789abcdef" });
-const CODE_WITHOUT_KEY = encodeSetupCode({ host: "beacon.local", port: 9001, base: SAVED.base, key: null });
+const CODE_WITH_KEY = encodeSetupCode({ host: "192.168.1.12", port: 9821, base: SAVED.base, key: "db_0123456789abcdef" });
+const CODE_WITHOUT_KEY = encodeSetupCode({ host: "beacon.local", port: 9821, base: SAVED.base, key: null });
 
 class FakeElement {
   constructor(document, tag, attributes = {}) {
@@ -459,7 +459,7 @@ test("saved settings prefill the form but never a secret; blank keeps them only 
   const player = configuredPlayer();
   const view = await openPage(player);
   assert.equal(view.$("details").hidden, false);
-  assert.deepEqual([view.$("host").value, view.$("port").value, view.$("base").value], ["192.168.1.12", "9001", SAVED.base]);
+  assert.deepEqual([view.$("host").value, view.$("port").value, view.$("base").value], ["192.168.1.12", "9821", SAVED.base]);
   assert.equal(view.$("password").value, "");
   assert.equal(view.$("key").value, "");
   assert.equal(view.$("password").placeholder, "Saved password");
@@ -483,7 +483,7 @@ test("saved settings prefill the form but never a secret; blank keeps them only 
   const form = formOf(view.posts("/api/connect")[0]);
   assert.deepEqual(form, {
     ssid: "Home", password: "", keepPassword: "1",
-    host: "192.168.1.12", port: "9001", base: SAVED.base, key: "", keepKey: "1",
+    host: "192.168.1.12", port: "9821", base: SAVED.base, key: "", keepKey: "1",
   });
   assertPlanned(form, SAVED_SECRETS, { ssid: "Home", password: SAVED_SECRETS.password, ...HUB, key: SAVED_SECRETS.key });
 });
@@ -509,7 +509,7 @@ test("the saved key is kept only on the saved network with its saved password ke
   await view.submit();
   assert.deepEqual(view.visibleErrors(), { key: KEY_STAYS });
   // The page stops it in the player's own words: this is what the player says to the form with the key kept.
-  const keptElsewhere = { ssid: "Office", password: "correct horse", ...HUB, port: "9001", key: "", keepKey: "1" };
+  const keptElsewhere = { ssid: "Office", password: "correct horse", ...HUB, port: "9821", key: "", keepKey: "1" };
   const verdicts = contract("connect", [{ saved: SAVED_SECRETS, form: keptElsewhere }]);
   if (verdicts) assert.deepEqual(verdicts[0], { ok: false, field: "key", message: KEY_STAYS });
 
@@ -523,7 +523,7 @@ test("the saved key is kept only on the saved network with its saved password ke
     await view.submit();
     assert.deepEqual(view.visibleErrors(), { key: KEY_NOT_WITH_TYPED }, password);
     // What the player makes of the form the page didn't send. Refused for the right password as for a wrong one.
-    const keptWithTyped = { ssid: "Home", password, ...HUB, port: "9001", key: "", keepKey: "1" };
+    const keptWithTyped = { ssid: "Home", password, ...HUB, port: "9821", key: "", keepKey: "1" };
     const [verdict] = contract("connect", [{ saved: SAVED_SECRETS, form: keptWithTyped }]) ?? [];
     if (verdict) assert.deepEqual([verdict.ok, verdict.field], [false, "key"], password);
   }
@@ -546,7 +546,7 @@ test("a password typed for the saved network connects with the key typed again",
   await view.type("key", "db_0123456789abcdef");
   await view.submit();
   const form = formOf(view.posts("/api/connect")[0]);
-  assert.deepEqual(form, { ssid: "Home", password: "newpassword9", ...HUB, port: "9001", key: "db_0123456789abcdef" });
+  assert.deepEqual(form, { ssid: "Home", password: "newpassword9", ...HUB, port: "9821", key: "db_0123456789abcdef" });
   assertPlanned(form, SAVED_SECRETS, { ssid: "Home", password: "newpassword9", ...HUB, key: "db_0123456789abcdef" });
 });
 
@@ -563,7 +563,7 @@ test("the saved key is offered again once the network is the saved one, typed by
   assert.equal(view.$("key").placeholder, "Saved key");
   await view.submit();
   assert.deepEqual(formOf(view.posts("/api/connect")[0]), {
-    ssid: "Home", password: "", keepPassword: "1", ...HUB, port: "9001", key: "", keepKey: "1",
+    ssid: "Home", password: "", keepPassword: "1", ...HUB, port: "9821", key: "", keepKey: "1",
   });
 
   // A saved open network has no password to keep, and blank still means the same network.
@@ -574,7 +574,7 @@ test("the saved key is offered again once the network is the saved one, typed by
   assert.equal(guest.$("key").placeholder, "Saved key");
   await guest.submit();
   const form = formOf(guest.posts("/api/connect")[0]);
-  assert.deepEqual(form, { ssid: "Café guest", password: "", ...HUB, port: "9001", key: "", keepKey: "1" });
+  assert.deepEqual(form, { ssid: "Café guest", password: "", ...HUB, port: "9821", key: "", keepKey: "1" });
   const secrets = { ...SAVED_SECRETS, ssid: "Café guest", password: "" };
   assertPlanned(form, secrets, { ssid: "Café guest", password: "", ...HUB, key: SAVED_SECRETS.key });
 });
@@ -653,23 +653,23 @@ test("the page decodes setup codes exactly as shared/setup-code.ts does", async 
     "/api/plugins/cartridge-player/api",
     encode([1, 2, 3]),
     encode("text"),
-    encode({ h: "192.168.1.12", p: "9001", b: SAVED.base }),
-    encode({ h: "192.168.1.12", p: 9001.5, b: SAVED.base }),
+    encode({ h: "192.168.1.12", p: "9821", b: SAVED.base }),
+    encode({ h: "192.168.1.12", p: 9821.5, b: SAVED.base }),
     encode({ h: "192.168.1.12", p: 0, b: SAVED.base }),
     encode({ h: "192.168.1.12", p: 65536, b: SAVED.base }),
-    encode({ h: "http://hub", p: 9001, b: SAVED.base }),
-    encode({ h: "192.168.1.12", p: 9001, b: "/api/plugins/../api" }),
-    encode({ h: "192.168.1.12", p: 9001, b: "/api/plugins/x/api/player" }),
-    encode({ h: "192.168.1.12", p: 9001, b: SAVED.base, k: "short" }),
-    encode({ h: "192.168.1.12", p: 9001, b: SAVED.base, k: "has a space" }),
-    encode({ h: "192.168.1.12", p: 9001, b: SAVED.base, k: null }),
-    encode({ h: "hûb", p: 9001, b: SAVED.base }),
+    encode({ h: "http://hub", p: 9821, b: SAVED.base }),
+    encode({ h: "192.168.1.12", p: 9821, b: "/api/plugins/../api" }),
+    encode({ h: "192.168.1.12", p: 9821, b: "/api/plugins/x/api/player" }),
+    encode({ h: "192.168.1.12", p: 9821, b: SAVED.base, k: "short" }),
+    encode({ h: "192.168.1.12", p: 9821, b: SAVED.base, k: "has a space" }),
+    encode({ h: "192.168.1.12", p: 9821, b: SAVED.base, k: null }),
+    encode({ h: "hûb", p: 9821, b: SAVED.base }),
   ];
   for (const code of codes) assert.deepEqual(pageDecode(code), decodeSetupCode(code), code);
   assert.ok(codes.filter((code) => decodeSetupCode(code) === null).length >= 18, "most cases are rejections");
 
   const values = [
-    "192.168.1.12", "", "a b", 9001, 0, 70000, "9001", 1.5, SAVED.base, "/api/plugins/./api", null, "db_x", "db_0123456789",
+    "192.168.1.12", "", "a b", 9821, 0, 70000, "9821", 1.5, SAVED.base, "/api/plugins/./api", null, "db_x", "db_0123456789",
   ];
   for (const field of ["host", "port", "base", "key"]) {
     for (const value of values) {
@@ -690,7 +690,7 @@ test("Connect posts the form with the setup token; a code without a key asks for
     code: "That isn't a whole setup code. Copy it again from the Cartridge Player page in Drift Beacon.",
   });
   await view.type("code", CODE_WITHOUT_KEY);
-  assert.equal(view.$("code-summary").textContent, "Hub beacon.local:9001 · add the API key below");
+  assert.equal(view.$("code-summary").textContent, "Hub beacon.local:9821 · add the API key below");
   assert.equal(view.$("key-wrap").hidden, false);
   await view.submit();
   assert.deepEqual(view.visibleErrors(), { key: KEY_NEEDED });
@@ -700,7 +700,7 @@ test("Connect posts the form with the setup token; a code without a key asks for
   );
 
   await view.type("code", CODE_WITH_KEY);
-  assert.equal(view.$("code-summary").textContent, "Hub 192.168.1.12:9001 · key included");
+  assert.equal(view.$("code-summary").textContent, "Hub 192.168.1.12:9821 · key included");
   assert.equal(view.$("key-wrap").hidden, true);
   await view.submit();
   const [post] = view.posts("/api/connect");
@@ -720,10 +720,10 @@ test("a code without its key is sent as hub fields with the key typed beside it"
   await view.submit();
   const form = formOf(view.posts("/api/connect")[0]);
   assert.deepEqual(form, {
-    ssid: "Café guest", password: "", host: "beacon.local", port: "9001", base: SAVED.base, key: "db_0123456789abcdef",
+    ssid: "Café guest", password: "", host: "beacon.local", port: "9821", base: SAVED.base, key: "db_0123456789abcdef",
   });
   assertPlanned(form, {}, {
-    ssid: "Café guest", password: "", host: "beacon.local", port: 9001, base: SAVED.base, key: "db_0123456789abcdef",
+    ssid: "Café guest", password: "", host: "beacon.local", port: 9821, base: SAVED.base, key: "db_0123456789abcdef",
   });
 });
 
@@ -807,7 +807,7 @@ test("with a setup code, the player's complaint about the hub shows on the code"
   await view.type("code", CODE_WITH_KEY);
   const failures = {
     base: "Nothing answers at this plugin path. Is Cartridge Player installed, up to date and on?",
-    host: "Can't reach 192.168.1.12:9001. Check the address, and that the hub is on this network",
+    host: "Can't reach 192.168.1.12:9821. Check the address, and that the hub is on this network",
     port: "Enter a port from 1 to 65535",
   };
   let id = 0;
@@ -850,7 +850,7 @@ test("a kept key the player refuses shows on the key field, with the hints of wh
   assert.equal(view.$("key").placeholder, "Saved key");
   player.state = { device: DEVICE, token: "fresh", configured: false, saved: null, attempt: IDLE };
   await view.submit();
-  assert.deepEqual(forms[1], { ssid: "Café guest", password: "", ...HUB, port: "9001", key: "", keepKey: "1" });
+  assert.deepEqual(forms[1], { ssid: "Café guest", password: "", ...HUB, port: "9821", key: "", keepKey: "1" });
   assert.deepEqual(view.visibleErrors(), { key: refusal.error });
   assert.equal(view.$("note").textContent, refusal.error);
   assert.equal(view.$("key").placeholder, "db_…");
@@ -1227,7 +1227,7 @@ test("after an erase the page forgets what was saved and waits for the restarted
   assert.deepEqual([view.$("connect").disabled, view.$("connect").textContent], [true, "Restarting…"]);
   assert.deepEqual([view.$("exit").hidden, view.$("reset").hidden, view.$("reset-confirm").hidden], [true, false, true]);
   assert.deepEqual([view.$("details").hidden, view.$("code-wrap").hidden], [true, false]);
-  assert.deepEqual(["host", "port", "base", "key", "password"].map((id) => view.$(id).value), ["", "9001", "", "", ""]);
+  assert.deepEqual(["host", "port", "base", "key", "password"].map((id) => view.$(id).value), ["", "9821", "", "", ""]);
   assert.equal(view.row("Home").getAttribute("aria-pressed"), "false");
   assert.equal(view.row("Home").textContent, "Home, secured, strong signal");
   assert.equal(view.$("password-wrap").hidden, true);
@@ -1343,7 +1343,7 @@ test("every POST is a form-encoded string, which is all the player reads: never 
 
 test("the stand-in player keeps and refuses saved secrets as the player does", (t) => {
   if (missing) return t.skip(missing);
-  const kept = { ...HUB, port: "9001", key: "", keepKey: "1" };
+  const kept = { ...HUB, port: "9821", key: "", keepKey: "1" };
   const open = { ...SAVED_SECRETS, ssid: "Café guest", hasPassword: false, password: "" };
   // Each as [what is saved, the form, the field refused (null: accepted)].
   const cases = [
@@ -1373,7 +1373,7 @@ test("Paste reads the clipboard where the browser allows it, and otherwise point
   allowed.$("paste").fire("click");
   await allowed.tick();
   assert.equal(allowed.$("code").value, CODE_WITH_KEY);
-  assert.equal(allowed.$("code-summary").textContent, "Hub 192.168.1.12:9001 · key included");
+  assert.equal(allowed.$("code-summary").textContent, "Hub 192.168.1.12:9821 · key included");
 
   const refused = await openPage(world({ navigator: { clipboard: { readText: async () => { throw new Error("denied"); } } } }));
   refused.$("paste").fire("click");

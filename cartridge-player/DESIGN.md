@@ -410,7 +410,7 @@ that reached the player through its station address is closed unread, whatever i
   { "device": { "id": "cp-a1b2c3", "name": "Cartridge-A1B2", "fw": "2.0.0", "reader": "ok" },
     "token": "8f3a…",
     "configured": true,
-    "saved": { "ssid": "Home", "hasPassword": true, "host": "192.168.1.12", "port": 9001,
+    "saved": { "ssid": "Home", "hasPassword": true, "host": "192.168.1.12", "port": 9821,
                "base": "/api/plugins/x/api", "hasKey": true },
     "attempt": { "id": 3, "phase": "idle", "message": "", "field": null, "ip": null, "ssid": null } }
   ```
@@ -642,7 +642,7 @@ firmware, last heard) with "Set up a player", which opens the same guide.
 The guide asks one question at a time, each with one main action:
 
 1. **Where is your hub?** Only when the page can't work the address out (prefilled from a player's `hubHost`, else
-   the page's host; port 9001 unless known). `localhost` is refused, since a player can't reach it: a page open on a
+   the page's host; port 9821 unless known). `localhost` is refused, since a player can't reach it: a page open on a
    loopback host starts empty, and the untouched field asks in a neutral hint; only what the user typed is marked as
    an error. Which steps there are is decided when the guide opens (`guideSteps`), so typing an address doesn't make
    its own step vanish.

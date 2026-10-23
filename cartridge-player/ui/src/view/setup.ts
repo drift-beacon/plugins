@@ -9,8 +9,8 @@ import { encodeSetupCode, setupFieldError } from "../../../shared/setup-code.ts"
 import type { PresenceState } from "../../../shared/state.ts";
 import { activeDevice, type PlayerRecord } from "../../../shared/storage.ts";
 
-/** The hub's HTTP listener for the Home Assistant add-on, and the usual one. */
-export const DEFAULT_PORT = 9001;
+/** The hub's default HTTP port, in the Home Assistant app and elsewhere. */
+export const DEFAULT_PORT = 9821;
 
 /**
  * Where the player serves its setup page while its own network is up (player/src/hal/wifi_link.cpp). Not the
@@ -32,7 +32,7 @@ export interface HubAddress {
   readonly port: number;
 }
 
-/** A Host header as host and port: "192.168.1.12:9001", "hub.local" (port 80). IPv6 literals aren't supported. */
+/** A Host header as host and port: "192.168.1.12:9821", "hub.local" (port 80). IPv6 literals aren't supported. */
 export function splitHost(hostHeader: string): HubAddress | null {
   const match = /^([A-Za-z0-9._-]{1,253})(?::(\d{1,5}))?$/.exec(hostHeader.trim());
   if (!match) return null;

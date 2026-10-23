@@ -71,7 +71,7 @@ later).
 2. Power the player. With nothing saved it opens its own Wi-Fi network, **Cartridge-XXXX** (the light breathes
    blue). Join it from your phone; the setup page opens by itself (or go to `http://10.123.45.1/`).
 3. Pick your Wi-Fi and type its password. Paste the setup code. (Or choose *Enter details instead*: the hub's address,
-   port 9001 for the Home Assistant add-on, the plugin path and the key.)
+   HTTP port 9821, the plugin path and the key.)
 4. Press **Connect** and watch the checklist: joining your Wi-Fi, the address it got, the plugin answering, saved.
    Your phone may drop off the player's network for a moment while it joins; rejoin to see the result. When it says
    saved, the player's network closes a minute later and the player runs. The plugin's page shows it online.
@@ -189,7 +189,7 @@ The console never shows the API key or the Wi-Fi password, only whether they are
 
 ## Security
 
-The player talks to the hub over plain HTTP on your network, like the Home Assistant add-on's port 9001 itself, so
+The player talks to the hub over plain HTTP on your network (the hub's port 9821), so
 anyone who can watch that network can see the API key. Give the player its own key. During setup the player's
 network is open, so stay nearby and finish within the few minutes it's up. The setup page only answers on the
 player's own network and at the player's own address, and needs a per-start token for every change. While setup is

@@ -222,34 +222,34 @@ const handMade = (text) => `CP1-${Buffer.from(text, "latin1").toString("base64ur
 
 compiled("setup codes from the interface decode identically in the firmware, and bad ones are refused by both", () => {
   const valid = [
-    { host: "192.168.1.12", port: 9001, base: BASE, key: `db_${"a1".repeat(20)}` },
+    { host: "192.168.1.12", port: 9821, base: BASE, key: `db_${"a1".repeat(20)}` },
     { host: "beacon.local", port: 1, base: "/api/plugins/cartridge-player-dev/api", key: null },
     { host: "a".repeat(253), port: 65535, base: `/api/plugins/${"i".repeat(128)}/api`, key: "k".repeat(256) },
     // Every printable character a key may hold, and the longest code there can be (each `"` and `\` escaped).
-    { host: "hub", port: 9001, base: BASE, key: "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~09azAZ" },
-    { host: "hub", port: 9001, base: BASE, key: '"\\'.repeat(128) },
+    { host: "hub", port: 9821, base: BASE, key: "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~09azAZ" },
+    { host: "hub", port: 9821, base: BASE, key: '"\\'.repeat(128) },
   ].map(encodeSetupCode);
   const codes = [
     ...valid,
     ` \n\t${valid[0]}\r\n`,
     `\u00a0${valid[1]}\u3000\ufeff`,
-    handMade('{"h":"x","p":9001.0,"b":"/api/plugins/x/api"}'),
+    handMade('{"h":"x","p":9821.0,"b":"/api/plugins/x/api"}'),
     handMade('{"h":"x","p":9.001e3,"b":"/api/plugins/x/api"} '),
-    handMade('{"h":"x","p":9001,"b":"/api/plugins/x/api","later":{"a":[1,2,{"b":null}]}}'),
-    handMade('{"h":"\\u0078","p":9001,"b":"/api/plugins/x/api"}'),
-    handMade('{"h":"bad host","h":"x","p":9001,"b":"/api/plugins/x/api"}'),
-    handMade('{"h":"x","p":9001,"b":"/api/plugins/x/api","n":"caf\u00e9"}'),
-    handMade('{"h":"x","p":9001,"b":"/api/plugins/x/api","k":null}'),
-    handMade('{"h":"x","h":"bad host","p":9001,"b":"/api/plugins/x/api"}'),
-    handMade('{"h":"x\\u0000","p":9001,"b":"/api/plugins/x/api"}'),
+    handMade('{"h":"x","p":9821,"b":"/api/plugins/x/api","later":{"a":[1,2,{"b":null}]}}'),
+    handMade('{"h":"\\u0078","p":9821,"b":"/api/plugins/x/api"}'),
+    handMade('{"h":"bad host","h":"x","p":9821,"b":"/api/plugins/x/api"}'),
+    handMade('{"h":"x","p":9821,"b":"/api/plugins/x/api","n":"caf\u00e9"}'),
+    handMade('{"h":"x","p":9821,"b":"/api/plugins/x/api","k":null}'),
+    handMade('{"h":"x","h":"bad host","p":9821,"b":"/api/plugins/x/api"}'),
+    handMade('{"h":"x\\u0000","p":9821,"b":"/api/plugins/x/api"}'),
     handMade('{"h":"x","p":-0,"b":"/api/plugins/x/api"}'),
     handMade('{"h":"x","p":1e400,"b":"/api/plugins/x/api"}'),
-    handMade('{"h":"x","p":"9001","b":"/api/plugins/x/api"}'),
-    handMade('{"h":"x","p":9001,"b":"/api/plugins/x/api",}'),
-    handMade('[{"h":"x","p":9001,"b":"/api/plugins/x/api"}]'),
+    handMade('{"h":"x","p":"9821","b":"/api/plugins/x/api"}'),
+    handMade('{"h":"x","p":9821,"b":"/api/plugins/x/api",}'),
+    handMade('[{"h":"x","p":9821,"b":"/api/plugins/x/api"}]'),
     handMade('"text"'),
-    handMade('{"h":"x","p":9001,"b":"/api/plugins/x/api/player"}'),
-    handMade('{"h":"x","p":9001,"b":"/api/plugins/x/api","k":"has space1"}'),
+    handMade('{"h":"x","p":9821,"b":"/api/plugins/x/api/player"}'),
+    handMade('{"h":"x","p":9821,"b":"/api/plugins/x/api","k":"has space1"}'),
     valid[0].slice(0, -1),
     valid[0].slice(0, -2),
     valid[0].toLowerCase(),
@@ -280,8 +280,8 @@ compiled("setup codes from the interface decode identically in the firmware, and
 
 compiled("each setup field is judged the same way, with the same message, in the firmware and the interface", () => {
   const values = {
-    host: ["192.168.1.12", "beacon.local", "", "http://x", "x:9001", "a b", "a".repeat(253), "a".repeat(254), "héllo", 5, null],
-    port: [1, 9001, 65535, 0, 65536, -1, 9001.5, "9001", null],
+    host: ["192.168.1.12", "beacon.local", "", "http://x", "x:9821", "a b", "a".repeat(253), "a".repeat(254), "héllo", 5, null],
+    port: [1, 9821, 65535, 0, 65536, -1, 9821.5, "9821", null],
     base: [
       BASE,
       "/api/plugins/./api",

@@ -9,7 +9,7 @@ const MIN = 60_000;
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 
-export const DEVICE = { id: "cp-a1b2c3", name: "Cartridge-A1B2", fw: "2.0.0", hubHost: "192.168.1.12:9001" } as const;
+export const DEVICE = { id: "cp-a1b2c3", name: "Cartridge-A1B2", fw: "2.0.0", hubHost: "192.168.1.12:9821" } as const;
 export const API_PATH = "/api/plugins/cartridge-player-dev/api";
 
 export const CATEGORIES: CategoryView[] = [

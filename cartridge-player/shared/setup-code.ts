@@ -2,7 +2,7 @@
  * The setup code: everything a player needs to reach this plugin, as one string the user copies from the interface
  * and pastes into the player's setup page, instead of typing a host, a port, a path and a key on a phone.
  *
- *   CP1-<base64url of {"h":"192.168.1.12","p":9001,"b":"/api/plugins/<id>/api","k":"db_…"}>
+ *   CP1-<base64url of {"h":"192.168.1.12","p":9821,"b":"/api/plugins/<id>/api","k":"db_…"}>
  *
  * `k`, the workspace API key, is optional: the plugin can't create or read keys, so the user pastes one into the
  * interface, which builds the code in memory and never stores or sends it. Without `k` the setup page asks for the key

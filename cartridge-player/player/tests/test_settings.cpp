@@ -12,7 +12,7 @@ StoredValues whole() {
   stored.ssid = "Home";
   stored.password = "hunter22";
   stored.host = "192.168.1.12";
-  stored.port = 9001;
+  stored.port = 9821;
   stored.base = "/api/plugins/github.12345.cartridge-player/api";
   stored.key = "db_0123456789abcdef";
   return stored;
@@ -39,7 +39,7 @@ int main() {
     CHECK_TEXT(settings.ssid, "Home");
     CHECK_TEXT(settings.password, "hunter22");
     CHECK_TEXT(settings.hub.host, "192.168.1.12");
-    CHECK(settings.hub.port == 9001);
+    CHECK(settings.hub.port == 9821);
     CHECK_TEXT(settings.hub.base, "/api/plugins/github.12345.cartridge-player/api");
     CHECK_TEXT(settings.hub.key, "db_0123456789abcdef");
     CHECK(settings.buzzer);
@@ -47,7 +47,7 @@ int main() {
 
   check::run("a hub loads only whole: without a valid host, port, base or key there is none, and Wi-Fi is kept", [] {
     void (*const broken[])(StoredValues&) = {
-        [](StoredValues& stored) { stored.host = "beacon.local:9001"; },
+        [](StoredValues& stored) { stored.host = "beacon.local:9821"; },
         [](StoredValues& stored) { stored.port = 0; },
         [](StoredValues& stored) { stored.base = ""; },
         [](StoredValues& stored) { stored.base = "/api/plugins/../api"; },

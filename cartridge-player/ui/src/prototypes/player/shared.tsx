@@ -177,7 +177,7 @@ export function CopyButton({ text, className }: { text: string; className?: stri
  */
 export const SETUP_STEPS = [
   { title: "Join the player's network", body: "Wi-Fi “Cartridge-XXXX”, no password. The setup page opens by itself, or go to http://10.123.45.1/." },
-  { title: "Point it at your hub", body: "Choose Enter details instead: hub hostname or IP, HTTP port 9001 for the Home Assistant add-on, and a workspace API key." },
+  { title: "Point it at your hub", body: "Choose Enter details instead: hub hostname or IP, HTTP port 9821, and a workspace API key." },
   { title: "Paste the plugin path", body: "The player checks the path and key before it saves the hub." },
 ];
 

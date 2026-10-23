@@ -127,7 +127,7 @@ function model({ slot = null, mappings = { [TAG]: "deep", [OTHER]: "gym" }, live
     mappings: readMappings(mappings),
     record: readPlayerRecord({
       v: 1,
-      devices: devices ?? { [DEVICE]: { name: "Cartridge-A1B2", fw: "2.0.0", slot, lastHeardAt: iso(NOW - 60_000), hubHost: "192.168.1.12:9001" } },
+      devices: devices ?? { [DEVICE]: { name: "Cartridge-A1B2", fw: "2.0.0", slot, lastHeardAt: iso(NOW - 60_000), hubHost: "192.168.1.12:9821" } },
       active: devices ? null : DEVICE,
       unknown,
       cartridges: { [TAG]: { seenAt: iso(NOW - 3_600_000), plays: 4, playedMs: 7_200_000 } },
@@ -274,7 +274,7 @@ test("render: first run opens the guide on one question, and asks for the hub's 
 test("render: the code step holds a code the player accepts, with Copy as its main action", () => {
   const view = render(model({ devices: {}, mappings: {}, presence: null }), ui.createElement(ui.SetupGuide, { initialStep: "code" }));
   const code = findAll(view.tree, (n) => n.tag === "input" && n.attrs["aria-label"] === "Setup code")[0];
-  assert.deepEqual(decodeSetupCode(code.attrs.value), { host: "192.168.1.12", port: 9001, base: "/api/plugins/cartridge-player/api", key: null });
+  assert.deepEqual(decodeSetupCode(code.attrs.value), { host: "192.168.1.12", port: 9821, base: "/api/plugins/cartridge-player/api", key: null });
   assert.ok(view.button("Copy code"));
   // Continue is there from the start (a copy the frame refuses must not strand the user), and Back leads to the key.
   assert.ok(!has(view.button("Continue"), "disabled"));

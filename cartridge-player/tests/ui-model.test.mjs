@@ -66,7 +66,7 @@ const LOOKUP = byId(ACTIVITIES);
 function record({ slot = null, cartridges = {}, unknown = [] } = {}) {
   return readPlayerRecord({
     v: 1,
-    devices: { "cp-a1b2c3": { slot, lastHeardAt: iso(NOW - MIN), hubHost: "192.168.1.12:9001" } },
+    devices: { "cp-a1b2c3": { slot, lastHeardAt: iso(NOW - MIN), hubHost: "192.168.1.12:9821" } },
     active: "cp-a1b2c3",
     unknown,
     cartridges,
@@ -225,30 +225,30 @@ test("presence: a player main hasn't heard yet since it started is waited for, n
   assert.equal(presenceView(published({ online: false }), device, NOW).health, "offline");
 });
 
-test("setup: the guide starts from where a player reached the hub, else this page's host on 9001", () => {
-  assert.deepEqual(splitHost("192.168.1.12:9001"), { host: "192.168.1.12", port: 9001 });
+test("setup: the guide starts from where a player reached the hub, else this page's host on 9821", () => {
+  assert.deepEqual(splitHost("192.168.1.12:9821"), { host: "192.168.1.12", port: 9821 });
   assert.deepEqual(splitHost("hub.local"), { host: "hub.local", port: 80 });
-  assert.equal(splitHost("[::1]:9001"), null);
+  assert.equal(splitHost("[::1]:9821"), null);
   const known = readPlayerRecord({ v: 1, devices: { "cp-a1b2c3": { hubHost: "hub.local:8123" } }, active: "cp-a1b2c3" });
   assert.deepEqual(hubDefaults(known, "app.example"), { host: "hub.local", port: 8123 });
-  assert.deepEqual(hubDefaults(readPlayerRecord(null), "192.168.1.5"), { host: "192.168.1.5", port: 9001 });
+  assert.deepEqual(hubDefaults(readPlayerRecord(null), "192.168.1.5"), { host: "192.168.1.5", port: 9821 });
   // Opened on the hub's own machine: a player can't reach that address, so the guide offers none (and no error for
   // a value the user never typed) rather than prefilling one it must refuse.
-  for (const local of ["localhost", "127.0.0.1"]) assert.deepEqual(hubDefaults(readPlayerRecord(null), local), { host: "", port: 9001 });
+  for (const local of ["localhost", "127.0.0.1"]) assert.deepEqual(hubDefaults(readPlayerRecord(null), local), { host: "", port: 9821 });
   assert.deepEqual(hubDefaults(known, "localhost"), { host: "hub.local", port: 8123 });
 });
 
 test("setup: the code the guide builds is one the player accepts, key or not", () => {
   const base = "/api/plugins/github.12.cartridge-player/api";
-  const withKey = setupCodeFor({ host: " 192.168.1.12 ", port: "9001", base, key: " db_abcdefgh123 " });
-  assert.deepEqual(decodeSetupCode(withKey.code), { host: "192.168.1.12", port: 9001, base, key: "db_abcdefgh123" });
+  const withKey = setupCodeFor({ host: " 192.168.1.12 ", port: "9821", base, key: " db_abcdefgh123 " });
+  assert.deepEqual(decodeSetupCode(withKey.code), { host: "192.168.1.12", port: 9821, base, key: "db_abcdefgh123" });
   const noKey = setupCodeFor({ host: "hub.local", port: "80", base, key: "" });
   assert.equal(decodeSetupCode(noKey.code).key, null);
 });
 
 test("setup: no code while a field is wrong, and each field says why (localhost can't be reached by a player)", () => {
   const base = "/api/plugins/x/api";
-  const local = setupCodeFor({ host: "localhost", port: "9001", base, key: "" });
+  const local = setupCodeFor({ host: "localhost", port: "9821", base, key: "" });
   assert.equal(local.code, null);
   assert.match(local.problems.host, /only works on this computer/);
   const bad = setupCodeFor({ host: "http://hub", port: "70000", base, key: "has space" });

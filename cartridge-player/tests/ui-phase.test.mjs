@@ -50,7 +50,7 @@ function storage({ slot = null, history = [], devices } = {}) {
   return {
     v: 1,
     devices: devices ?? {
-      "cp-a1b2c3": { name: "Cartridge-A1B2", fw: "2.0.0", boot: 1, seq: 3, slot, lastHeardAt: iso(NOW - 60_000), hubHost: "192.168.1.12:9001" },
+      "cp-a1b2c3": { name: "Cartridge-A1B2", fw: "2.0.0", boot: 1, seq: 3, slot, lastHeardAt: iso(NOW - 60_000), hubHost: "192.168.1.12:9821" },
     },
     active: "cp-a1b2c3",
     unknown: [],

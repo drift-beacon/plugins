@@ -27,7 +27,7 @@ const device = { id: "cp-a1b2c3", name: "Cartridge-A1B2", fw: "2.0.0", reader: "
 let token = randomBytes(8).toString("hex");
 const BASE = "/api/plugins/cartridge-player/api";
 let saved = args.includes("--saved")
-  ? { ssid: "Home", hasPassword: true, host: "192.168.1.12", port: 9001, base: BASE, hasKey: true }
+  ? { ssid: "Home", hasPassword: true, host: "192.168.1.12", port: 9821, base: BASE, hasKey: true }
   : null;
 /** The password behind `saved.hasPassword`. Never sent: only compared, as the player does for a kept key. */
 let savedPassword = saved ? "home-password" : "";
@@ -136,7 +136,7 @@ function run(form) {
   });
   later(5000, () => {
     if (key.includes("bad")) return fail("key", "The hub didn't accept this API key");
-    const { host = "192.168.1.12", port: hubPort = "9001", base = BASE } = form;
+    const { host = "192.168.1.12", port: hubPort = "9821", base = BASE } = form;
     saved = { ...wifi, host, port: Number(hubPort), base, hasKey: true };
     savedPassword = password;
     attempt.phase = "done";

@@ -22,7 +22,7 @@ const device = (id, fields = {}) => ({
   seq: 3,
   slot: null,
   lastHeardAt: AT,
-  hubHost: "192.168.1.12:9001",
+  hubHost: "192.168.1.12:9821",
   ...fields,
 });
 
