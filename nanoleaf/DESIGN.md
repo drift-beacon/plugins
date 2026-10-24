@@ -412,7 +412,7 @@ The private channel's types and input schemas; see [Commands and the channel](#c
 - Accept responses whose ST or NT matches `/nanoleaf/i`, or that carry `nl-deviceid` / `nl-devicename`. `Location: http://ip:port`, `nl-devicename` and `nl-deviceid` supply the fields, and the model comes from the ST suffix (for example `NL42`).
 
 **mDNS through the hub (SDK 0.2.11).**
-- `mdns` is `hubMdnsOf(ctx)`: `ctx.discovery.mdns` when the hub has it, else null. It is read structurally (`MdnsApi`, `MdnsService` and `MdnsOptions` are local copies of the SDK's, by name), because the SDK this repo builds against has no `discovery` on `MainContext` yet. Once 0.2.11 is published and required, the SDK's own types replace them.
+- `mdns` is `ctx.discovery?.mdns`, or null on a Drift Beacon older than 0.2.11, which has no `ctx.discovery`. The types (`MdnsApi`, `MdnsService`, `MdnsOptions`) are the SDK's.
 - With it, the mDNS half is `mdns.browse("_nanoleafapi._tcp", { timeoutMs, signal })`, and no mDNS socket is opened. A service becomes a controller as the own parser makes one: the first IPv4 address, else the address that answered (none: skipped); the SRV port, else 16021; the instance's name; `md` and `id` from the TXT. At the call's deadline the browse is aborted, so it resolves at once with what the hub heard, and it gets 250 ms more to arrive.
 - **`stopped`** (the instance is stopping) ends the whole call at once with nothing, without the fallback: nothing found then would be used.
 - **Any other rejection** (`unavailable`: no network interface to ask on, or a limit) falls back to the own query for the rest of that call; the next call asks the hub again. The console says so once per instance (`log`, at `info`; `said` is the per-instance memory index.ts keeps).
@@ -571,7 +571,7 @@ On yield: stop streaming, release the claim, don't restore, set `yieldedKey = sc
 - Every async task has a `.catch` that logs.
 - Handlers map device errors to `PluginError` codes (`requestError`): `unavailable` for anything worth trying again later (`isTransient`: no answer, a timeout or a 5xx), `failed` for the rest (a refusal, a bad token). Everything else passes through for the platform to answer: a `PluginError` (`invalid`, `stopped`) with its code and message, a request's own abort reason as `timeout` or `stopped`, and a bug as `failed` with a reference, its stack in the plugin's console.
 - Messages to the interface go through `tell`, which logs a post that can't be sent (the instance is stopping) rather than failing the request that made it.
-- The Controller's `discover` (for [finding the controller again](#finding-the-controller-again)) is `discovery.ts` listening for 2.5 s (`SEARCH_MS`), or `NanoleafPluginOptions.discover` when a test or tool supplies one. It and the `discover` request share `find`, which passes `hubMdnsOf(ctx)` (read once at start) and one `said` set per instance, so what discovery says once is said once per instance.
+- The Controller's `discover` (for [finding the controller again](#finding-the-controller-again)) is `discovery.ts` listening for 2.5 s (`SEARCH_MS`), or `NanoleafPluginOptions.discover` when a test or tool supplies one. It and the `discover` request share `find`, which passes `ctx.discovery?.mdns` (read once at start) and one `said` set per instance, so what discovery says once is said once per instance.
 - Device errors the Director hits while driving (REST failures, and `ExtControlStream`'s `onError` when frames start failing) go to `controller.reportError`.
 
 ### Commands and the channel

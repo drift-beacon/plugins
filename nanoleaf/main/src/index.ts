@@ -21,7 +21,7 @@ import { createOwner } from "./claims.ts";
 import { Controller, type ControllerTimings } from "./controller.ts";
 import { createDirector, type Director, type DirectorTimings } from "./director.ts";
 import { assertLanHost, type Lookup } from "./lan.ts";
-import { discover, hubMdnsOf } from "./nanoleaf/discovery.ts";
+import { discover } from "./nanoleaf/discovery.ts";
 import { EventStream, type Touch } from "./nanoleaf/events.ts";
 import { isTransient, NanoleafClient, NanoleafError } from "./nanoleaf/http.ts";
 import { ExtControlStream } from "./nanoleaf/stream.ts";
@@ -77,7 +77,7 @@ export function startNanoleaf(ctx: MainContext, options: NanoleafPluginOptions =
   const allowLoopback = ctx.plugin.id === DEVELOPMENT_ID;
   // Discovery browses mDNS through the hub (`ctx.discovery.mdns`, SDK 0.2.11) when this Drift Beacon has it, and with
   // its own query otherwise. `said` holds what it has told this instance's console once.
-  const mdns = hubMdnsOf(ctx);
+  const mdns = ctx.discovery?.mdns ?? null;
   const said = new Set<string>();
   const find: Find = (listenMs, signal) =>
     discover({ timeoutMs: listenMs, signal, mdns, said, log: (message, error) => log.info(message, error) });

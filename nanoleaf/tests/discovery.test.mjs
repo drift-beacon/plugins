@@ -5,7 +5,6 @@ import {
   buildMdnsQuery,
   buildSsdpSearch,
   discover,
-  hubMdnsOf,
   mergeFound,
   parseDnsMessage,
   parseMdns,
@@ -563,16 +562,9 @@ async function ssdpResponder(t, { shapes = true, canvas = true } = {}) {
   return ssdp;
 }
 
-test("hubMdnsOf finds ctx.discovery.mdns only on a hub that has it, and without it discover asks itself", async () => {
-  assert.equal(hubMdnsOf({}), null, "a Drift Beacon older than 0.2.11 has no ctx.discovery");
-  assert.equal(hubMdnsOf({ discovery: undefined }), null);
-  assert.equal(hubMdnsOf({ discovery: {} }), null);
-  assert.equal(hubMdnsOf({ discovery: { mdns: { browse: "no" } } }), null);
-  const mdns = { browse: async () => [] };
-  assert.equal(hubMdnsOf({ discovery: { mdns } }), mdns);
-
+test("without the hub's mDNS (a Drift Beacon older than 0.2.11) discover asks itself", async () => {
   const sockets = routedSockets({});
-  assert.deepEqual(await discover({ timeoutMs: 50, createSocket: sockets.make, mdns: hubMdnsOf({}) }), []);
+  assert.deepEqual(await discover({ timeoutMs: 50, createSocket: sockets.make, mdns: null }), []);
   assert.deepEqual(sockets.made.sort(), ["mdns", "ssdp"], "its own mDNS socket, as before");
   assert.deepEqual(sockets.closed.sort(), ["mdns", "ssdp"]);
 });

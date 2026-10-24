@@ -7,6 +7,7 @@
  * emulator.
  */
 import { createSocket as createDgramSocket, type Socket } from "node:dgram";
+import type { MdnsApi, MdnsOptions, MdnsService } from "@drift-beacon/plugin";
 import { API_PORT } from "../../../shared/protocol.ts";
 import type { FoundController } from "../../../shared/types.ts";
 
@@ -29,55 +30,6 @@ export const DNS_TXT = 16;
 export const DNS_AAAA = 28;
 export const DNS_SRV = 33;
 
-/*
- * The part of the SDK's `ctx.discovery.mdns` that discovery uses, written out here with the SDK's names (`MdnsApi`,
- * `MdnsService`, `MdnsOptions` in @drift-beacon/plugin 0.2.11) and kept in step with them. Copies, because the SDK this
- * repo builds against (and CI with it) has no `discovery` on `MainContext` yet. Once 0.2.11 is published and
- * package.json requires it, import the SDK's own types instead and read `ctx.discovery?.mdns` directly in place of
- * `hubMdnsOf`.
- */
-
-/** As the SDK's `MdnsOptions`. */
-export interface MdnsOptions {
-  /** How long to listen: 2,000 ms by default, at most 10,000. */
-  readonly timeoutMs?: number;
-  /** Aborting resolves the call early with what it has heard so far. */
-  readonly signal?: AbortSignal;
-}
-
-/** As the SDK's `MdnsService`: what a device said, so the addresses are hints (pairing authenticates the device). */
-export interface MdnsService {
-  /** The instance's own name, unescaped: `Shapes AD82`. */
-  readonly instance: string;
-  readonly serviceType: string;
-  /** The host its SRV record names: `Shapes-AD82.local`. */
-  readonly host: string;
-  /** That host's IPv4 addresses; empty when no A record came in time. */
-  readonly addresses: readonly string[];
-  readonly port: number;
-  /** TXT keys in lowercase, with their values. */
-  readonly txt: Readonly<Record<string, string>>;
-  /** The address of the device that answered. */
-  readonly from: string;
-}
-
-/**
- * As the SDK's `MdnsApi`, browse only. It rejects with a `PluginError` (read `code`): `unavailable` when the hub has no
- * network interface to ask on or a limit was reached, `invalid` for arguments it can't send, `stopped` when the
- * instance stops (at once, not at the deadline).
- */
-export interface MdnsApi {
-  browse(serviceType: string, options?: MdnsOptions): Promise<readonly MdnsService[]>;
-}
-
-/** The hub's mDNS, `ctx.discovery.mdns`, or null on a Drift Beacon older than SDK 0.2.11, which has none. */
-export function hubMdnsOf(ctx: object): MdnsApi | null {
-  const mdns = (ctx as { readonly discovery?: { readonly mdns?: unknown } }).discovery?.mdns;
-  return typeof mdns === "object" && mdns !== null && typeof (mdns as Partial<MdnsApi>).browse === "function"
-    ? (mdns as MdnsApi)
-    : null;
-}
-
 /** How long a hub browse may take to answer once this call's own time is up (an IPC round trip, normally). */
 const HUB_BROWSE_GRACE_MS = 250;
 
@@ -91,7 +43,7 @@ export interface DiscoverOptions {
   readonly signal?: AbortSignal;
   readonly log?: (message: string, error?: unknown) => void;
   /**
-   * The hub's mDNS (`hubMdnsOf(ctx)`): the mDNS half browses through it in place of the own query. When it rejects
+   * The hub's mDNS (`ctx.discovery?.mdns`, null without it): the mDNS half browses through it in place of the own query. When it rejects
    * `stopped` the instance is stopping, and the whole call ends at once with nothing. Any other rejection
    * (`unavailable`, say) falls back to the own query for the rest of this call. Absent or null: the own query.
    */
