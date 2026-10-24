@@ -1,6 +1,6 @@
 import { Button, Input } from "@heroui/react";
 import { cn } from "@heroui/theme";
-import { ChevronRight, Hexagon, Info, Keyboard, RotateCw } from "lucide-react";
+import { ChevronRight, Hexagon, Keyboard, RotateCw } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FoundController } from "../../../../shared/types.ts";
@@ -142,9 +142,8 @@ interface FindStepProps {
 
 /**
  * Step 1: find the controller. Discovery starts at once and the radar sweeps while it listens; what answers lands
- * as cards. Typing an address always works too (and is the only way when the controller is on another network). A search
- * that is replaced or left behind is given up in main too, and one that failed runs again by itself once main is
- * back in touch.
+ * as cards. Typing an address always works too. A search that is replaced or left behind is given up in main too, and one
+ * that failed runs again by itself once main is back in touch.
  */
 export function FindStep({ onPick, initialAddress, found, onFound }: FindStepProps) {
   const model = useModel();
@@ -325,14 +324,6 @@ export function FindStep({ onPick, initialAddress, found, onFound }: FindStepPro
           </motion.div>
         )}
       </AnimatePresence>
-
-      <p className="flex gap-2 text-default-400 text-xs leading-relaxed">
-        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-        <span>
-          Controller not showing up? It may be on another network than your Drift Beacon server. Enter its address:
-          your router's device list or the Nanoleaf app's device info shows it.
-        </span>
-      </p>
     </div>
   );
 }

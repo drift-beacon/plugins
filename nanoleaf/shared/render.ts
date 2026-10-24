@@ -9,6 +9,7 @@ import { effectLight, prepareEffect, type PreparedEffect, sameEffect } from "./e
 import { OFF_SCENE } from "./scene.ts";
 import type {
   Alert,
+  FillSpan,
   GoalMark,
   GoalProgress,
   Moment,
@@ -48,6 +49,12 @@ export const IDENTIFY_BLINK_MS = 600;
 export const IDENTIFY_DIM = 0.06;
 /** The same scene shown differently (style, level, track, progress, goal, a leap) fades this long, unstaggered. */
 export const ADJUST_FADE_MS = 400;
+/** Tap to order holds the wall: a panel waiting for its number glows faintly warm white, a numbered one yellow. */
+export const DRAFT_WAITING = 0.1;
+export const DRAFT_MARKED = 0.5;
+export const DRAFT_YELLOW: Rgb = Object.freeze([255, 200, 0] as const);
+/** The device brightness a draft drives at, whatever the brightness settings: its levels are the whole story. */
+export const DRAFT_BRIGHTNESS = 100;
 /** A duration goal's progress step this big (share of the goal) fades; smaller ones (a live goal's creep) don't. */
 export const LEAP = 0.01;
 /**
@@ -74,9 +81,14 @@ const GOAL_MEMORY = 8;
 /** A goal-met wave's reach: where its bump is smaller than this it adds nothing. */
 const WAVE_TAIL = 0.02;
 
-/** Frame options. `reducedMotion` is for the UI only: the wall always gets the full motion. */
+/**
+ * Frame options. `reducedMotion` is for the UI only: the wall always gets the full motion. `spans`, parallel to the
+ * order, is each panel's share of a goal when the order fills as a line (order.ts `fillSpans`); without it, position
+ * k of n fills from k/n to (k+1)/n, one panel at a time.
+ */
 export interface RenderOptions {
   readonly reducedMotion?: boolean;
+  readonly spans?: readonly FillSpan[] | null;
 }
 
 const WHITE: Rgb = [255, 255, 255];
@@ -84,6 +96,12 @@ const TAU = 2 * Math.PI;
 
 function clamp01(x: number): number {
   return x > 0 ? (x < 1 ? x : 1) : 0;
+}
+
+/** How full position `k` is at `fraction` of a goal (`filled` = fraction·n): its span's share, or one panel's of n. */
+function fillAmount(spans: readonly FillSpan[] | null, fraction: number, filled: number, k: number): number {
+  const s = spans?.[k];
+  return s ? clamp01((fraction - s.start) / s.span) : clamp01(filled - k);
 }
 
 /** The crossfade curve: slow out of the old scene, slow into the new one. */
@@ -144,6 +162,7 @@ export function samePreview(a: Preview | null, b: Preview | null): boolean {
   if (a === b) return true;
   if (!a || !b || !sameRgb(a.rgb, b.rgb)) return false;
   if (a.mode === "identify") return b.mode === "identify" && sameIds(a.panelIds, b.panelIds);
+  if (a.mode === "draft") return b.mode === "draft" && sameIds(a.panelIds, b.panelIds);
   if (a.mode === "fill") return b.mode === "fill" && a.fraction === b.fraction;
   return b.mode === a.mode;
 }
@@ -471,10 +490,14 @@ interface Prepared {
   readonly peak: number;
   /** Whether the scene shows progress; without it every panel is full. */
   readonly hasProgress: boolean;
-  /** min(fraction, 1)·n: how many panels' worth is filled. */
+  /** The goal's fraction, clamped to 0–1, and that times n: how many panels' worth is filled. */
+  readonly fraction: number;
   readonly filled: number;
+  /** Each position's share of the goal when it fills as a line; null one panel at a time. */
+  readonly spans: readonly FillSpan[] | null;
   readonly trackFloor: boolean;
-  /** Position of the breathing panel, or -1. */
+  /** Whether the panels the fill is crossing breathe, and (one panel at a time) the position of the one that does. */
+  readonly breathing: boolean;
   readonly edgeK: number;
   readonly edge: number;
   readonly phase: number;
@@ -483,7 +506,7 @@ interface Prepared {
   readonly effect: PreparedEffect | null;
 }
 
-function prepare(scene: Scene, n: number, t: number, reduced: boolean): Prepared {
+function prepare(scene: Scene, n: number, t: number, reduced: boolean, spans: readonly FillSpan[] | null): Prepared {
   const progress = scene.progress;
   const mode =
     scene.kind === "control"
@@ -507,8 +530,11 @@ function prepare(scene: Scene, n: number, t: number, reduced: boolean): Prepared
     rgb: mode === OFF ? WARM_WHITE : (scene.rgb ?? WARM_WHITE),
     peak: scene.level,
     hasProgress: progress !== null,
+    fraction: clamp01(fraction),
     filled,
+    spans,
     trackFloor: progress !== null && (scene.track || bare),
+    breathing,
     edgeK: breathing ? Math.floor(filled) : -1,
     edge: breathing ? EDGE_BOOST * (0.5 - 0.5 * Math.cos((TAU * t) / EDGE_MS)) : 0,
     phase: t / PULSE_MS,
@@ -533,12 +559,12 @@ function levelAt(p: Prepared, k: number): number {
   if (p.mode === OFF) return 0;
   let fill = 1;
   if (p.hasProgress) {
-    const amount = clamp01(p.filled - k);
+    const amount = fillAmount(p.spans, p.fraction, p.filled, k);
     fill = p.trackFloor ? TRACK + (1 - TRACK) * amount : amount;
   }
   switch (p.mode) {
     case LIVE:
-      return k === p.edgeK ? Math.min(1, fill + p.edge) : fill;
+      return onEdge(p, k) ? Math.min(1, fill + p.edge) : fill;
     case GLOW:
       return p.peak * fill;
     case STEADY:
@@ -550,9 +576,19 @@ function levelAt(p: Prepared, k: number): number {
   }
 }
 
+/**
+ * Whether position `k` is where the fill is: the one panel filling, or (as a line) every panel the edge is crossing.
+ * Like the panel at a step's start, a panel the edge has only just reached counts.
+ */
+function onEdge(p: Prepared, k: number): boolean {
+  if (!p.breathing) return false;
+  const s = p.spans?.[k];
+  return s ? p.fraction >= s.start && p.fraction < s.start + s.span : k === p.edgeK;
+}
+
 /** The scene's own light for position `k` (0-based) of `n` at time `t`, before crossfades, moments and previews. */
 export function sceneLight(scene: Scene, k: number, n: number, t: number, opts?: RenderOptions): PanelLight {
-  const p = prepare(scene, n, t, opts?.reducedMotion === true);
+  const p = prepare(scene, n, t, opts?.reducedMotion === true, opts?.spans ?? null);
   return p.effect ? effectLight(p.effect, k) : { rgb: p.rgb, level: levelAt(p, k) };
 }
 
@@ -569,10 +605,20 @@ export function fillingPosition(progress: GoalProgress | null, n: number): numbe
 const IDENTIFY = 1;
 const FILL = 2;
 const ORDER = 3;
+const DRAFT = 4;
 
 /** Length of one order sweep over `n` panels. */
 export function orderSweepMs(n: number): number {
   return Math.min(4200, Math.max(1200, 700 + 110 * n));
+}
+
+/**
+ * How far an order sweep over `n` panels has got `dt` ms in: 0 to n + 2 each period, so the whole wall is lit and held
+ * a beat before it starts again. Over `n` it is the goal it shows (past 1 is the hold).
+ */
+export function orderSweep(n: number, dt: number): number {
+  const period = orderSweepMs(n);
+  return ((((dt % period) + period) % period) / period) * (n + 2);
 }
 
 /* ---- Frames ---- */
@@ -617,7 +663,14 @@ function wavesAt(moments: readonly Moment[], n: number, t: number): number[] | n
   return waves;
 }
 
-function sceneLayer(state: RenderState, n: number, t: number, reduced: boolean, depth: number): SceneLayer {
+function sceneLayer(
+  state: RenderState,
+  n: number,
+  t: number,
+  reduced: boolean,
+  depth: number,
+  spans: readonly FillSpan[] | null,
+): SceneLayer {
   const adjust = state.adjust === true;
   const full = adjust ? ADJUST_FADE_MS : FADE_MS;
   const fadeMs = reduced ? Math.min(full, REDUCED_FADE_MS) : full;
@@ -626,11 +679,11 @@ function sceneLayer(state: RenderState, n: number, t: number, reduced: boolean, 
   let from: SceneLayer | null = null;
   let prev: Prepared | null = null;
   if (state.previous && since < fadeMs + (stagger === 0 ? 0 : Math.min((n - 1) * stagger, STAGGER_MAX_MS))) {
-    if (state.from && depth < MAX_DEPTH) from = sceneLayer(state.from, n, t, reduced, depth + 1);
-    else prev = prepare(state.previous, n, t, reduced);
+    if (state.from && depth < MAX_DEPTH) from = sceneLayer(state.from, n, t, reduced, depth + 1, spans);
+    else prev = prepare(state.previous, n, t, reduced, spans);
   }
   return {
-    cur: prepare(state.scene, n, t, reduced),
+    cur: prepare(state.scene, n, t, reduced, spans),
     waves: reduced ? null : wavesAt(state.moments, n, t),
     from,
     prev,
@@ -701,6 +754,8 @@ interface PreviewPlan {
   readonly blink: number;
   readonly filled: number;
   readonly sweep: number;
+  readonly n: number;
+  readonly spans: readonly FillSpan[] | null;
   readonly w: number;
   readonly from: PreviewPlan | null;
   readonly out: Slot;
@@ -720,11 +775,12 @@ function previewPlan(
   at: number,
   reduced: boolean,
   depth: number,
+  spans: readonly FillSpan[] | null,
 ): PreviewPlan {
   const w = clamp01((at - fadeAt) / PREVIEW_FADE_MS);
   const from =
     w < 1 && below && depth < MAX_DEPTH
-      ? previewPlan(below.preview, below.previewAt, below.fadeAt, below.from, n, t, fadeAt, reduced, depth + 1)
+      ? previewPlan(below.preview, below.previewAt, below.fadeAt, below.from, n, t, fadeAt, reduced, depth + 1, spans)
       : null;
   let mode = 0;
   let ids: readonly number[] = NO_IDS;
@@ -739,13 +795,27 @@ function previewPlan(
   } else if (preview?.mode === "fill") {
     mode = FILL;
     filled = clamp01(preview.fraction) * n;
+  } else if (preview?.mode === "draft") {
+    mode = DRAFT;
+    ids = preview.panelIds;
   } else if (preview) {
     mode = ORDER;
-    const period = orderSweepMs(n);
-    sweep = ((((dt % period) + period) % period) / period) * (n + 2);
+    sweep = orderSweep(n, dt);
   }
   const rgb = preview?.rgb ?? null;
-  return { mode, rgb, ids, blink, filled, sweep, w, from, out: { rgb: WARM_WHITE, level: 0, tint: WARM_WHITE } };
+  return {
+    mode,
+    rgb,
+    ids,
+    blink,
+    filled,
+    sweep,
+    n,
+    spans,
+    w,
+    from,
+    out: { rgb: WARM_WHITE, level: 0, tint: WARM_WHITE },
+  };
 }
 
 const NO_IDS: readonly number[] = Object.freeze([]);
@@ -761,11 +831,17 @@ function previewAt(plan: PreviewPlan, k: number, id: number, scene: Slot): Slot 
   }
   let b = scene.level;
   let bRgb = scene.rgb;
-  if (plan.mode !== 0) {
+  if (plan.mode === DRAFT) {
+    // Its own colours, not the scene's: nothing of what showed before is left to confuse the taps.
+    const marked = plan.ids.includes(id);
+    bRgb = marked ? DRAFT_YELLOW : WARM_WHITE;
+    b = marked ? DRAFT_MARKED : DRAFT_WAITING;
+  } else if (plan.mode !== 0) {
     bRgb = plan.rgb ?? scene.tint;
     if (plan.mode === IDENTIFY) b = plan.ids.includes(id) ? plan.blink : IDENTIFY_DIM;
-    else if (plan.mode === FILL) b = TRACK + (1 - TRACK) * clamp01(plan.filled - k);
-    else b = 0.1 + 0.9 * clamp01(plan.sweep - k);
+    else if (plan.mode === FILL) b = TRACK + (1 - TRACK) * fillAmount(plan.spans, plan.filled / plan.n, plan.filled, k);
+    // Play: the order's sweep runs to n + 2 (all lit, held a beat), a line's edge as far past the wall.
+    else b = 0.1 + 0.9 * fillAmount(plan.spans, plan.sweep / plan.n, plan.sweep, k);
   }
   const w = plan.w;
   const out = plan.out;
@@ -785,7 +861,7 @@ function previewAt(plan: PreviewPlan, k: number, id: number, scene: Slot): Slot 
 /**
  * Every ordered panel's light at time `t`: the scene (crossfading from what was lit when it changed, staggered along
  * the order), goal-met waves on top, then the preview layers fading over it, then schedule alerts over everything,
- * the same on every panel. Keys are the panel ids in `order`
+ * the same on every panel, except over a draft (tap to order), which nothing interrupts. Keys are the panel ids in `order`
  * (n = order.length); callers treat layout panels missing from the map as dark.
  */
 export function renderFrame(
@@ -798,12 +874,15 @@ export function renderFrame(
   const n = order.length;
   if (n === 0) return out;
   const reduced = opts?.reducedMotion === true;
-  const scene = sceneLayer(state, n, t, reduced, 0);
+  const spans = opts?.spans && opts.spans.length === n ? opts.spans : null;
+  const scene = sceneLayer(state, n, t, reduced, 0, spans);
   const fadeAt = state.previewFadeAt ?? state.previewAt;
   const below = state.previewFrom ?? null;
   const showing = state.preview !== null || (below !== null && t - fadeAt < PREVIEW_FADE_MS);
-  const preview = showing ? previewPlan(state.preview, state.previewAt, fadeAt, below, n, t, t, reduced, 0) : null;
-  const alerts = alertPlans(state.alerts, t, reduced);
+  const preview = showing
+    ? previewPlan(state.preview, state.previewAt, fadeAt, below, n, t, t, reduced, 0, spans)
+    : null;
+  const alerts = state.preview?.mode === "draft" ? null : alertPlans(state.alerts, t, reduced);
   for (let k = 0; k < n; k++) {
     const id = order[k] as number;
     let light = sceneAt(scene, k);

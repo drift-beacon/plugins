@@ -149,3 +149,49 @@
     transition: none;
   }
 }
+
+/*
+ * The compass's centre: how a sweep fills, in miniature. It plays once when the fill changes and rests lit: the dots
+ * one after another (one panel at a time), or the bar filling smoothly (a line).
+ */
+@keyframes fill-dot {
+  from {
+    opacity: 0.25;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.fill-dot {
+  animation: fill-dot 160ms var(--wall-ease-out) both;
+}
+@keyframes fill-bar {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+.fill-bar {
+  transform-origin: left;
+  animation: fill-bar 700ms cubic-bezier(0.77, 0, 0.175, 1) 120ms both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .fill-dot,
+  .fill-bar {
+    animation: none;
+  }
+}
+
+/*
+ * The board's night sky behind the drawing: stars thinning out toward the edges and fading into the page, a sky and
+ * not a box. A light page keeps the sky dark (white stars and lit panels need the night), fading the same way.
+ */
+.night-sky {
+  mask-image: radial-gradient(ellipse 75% 70% at 50% 45%, black 45%, transparent 100%);
+}
+:root.light .night-sky,
+:root[data-color-mode="light"] .night-sky {
+  background: #09090b;
+}

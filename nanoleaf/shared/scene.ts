@@ -109,7 +109,8 @@ export function decideScene({ userId, activities, sessions, settings, now, contr
       cssColor: pinned.color,
       rgb: ledColor(pinned),
       progress: settings.pinnedProgress ? goalProgress(pinned, sessions, userId, at) : null,
-      level: settings.pinnedLevel / 100,
+      // Dimmed by the wall's brightness instead (main drives a pin at `pinnedBrightness`).
+      level: 1,
       style: settings.pinnedStyle,
       track: settings.track,
     };

@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { adjacency, layoutFromPanelLayout, placeLayout } from "../shared/geometry.ts";
-import { autoOrder, isComplete, mulberry32, resolveOrder, shuffle } from "../shared/order.ts";
-import { AUTO_ORDERS, readOrder } from "../shared/storage.ts";
+import { autoOrder, fillSpans, fillsAsLine, isComplete, mulberry32, resolveOrder, shuffle } from "../shared/order.ts";
+import { AUTO_ORDERS, DEFAULT_ORDER, readOrder } from "../shared/storage.ts";
 
 const WALLS = ["theduck", "wings", "hexagons", "minis", "big"];
 const layoutOf = (name) => {
@@ -352,7 +352,7 @@ test("resolveOrder: custom keeps the saved order and fixes it up when panels com
   // What storage reads back resolves the same way.
   const stored = readOrder(JSON.parse(JSON.stringify({ mode: "custom", auto: "path", ids: kept, seed: 1 })));
   assert.deepEqual(resolveOrder(stored, panels), expected);
-  assert.deepEqual(resolveOrder(readOrder(undefined), panels), path);
+  assert.deepEqual(resolveOrder(readOrder(undefined), panels), autoOrder(panels, "bottom-up"));
 });
 
 test("isComplete is true only when the saved ids are exactly the layout's panels", () => {
@@ -368,4 +368,79 @@ test("isComplete is true only when the saved ids are exactly the layout's panels
   assert.equal(isComplete(order([]), []), true);
   assert.equal(isComplete(order([]), panels), false);
   assert.equal(isComplete(order(ids), [{ id: ids[0] }]), false);
+});
+
+/** A square panel of side 20 centred at (cx, cy): enough geometry for a line's spans. */
+const square = (id, cx, cy) => ({
+  id,
+  shapeType: 7,
+  kind: "hexagon",
+  side: 20,
+  center: [cx, cy],
+  corners: [
+    [cx - 10, cy - 10],
+    [cx + 10, cy - 10],
+    [cx + 10, cy + 10],
+    [cx - 10, cy + 10],
+  ],
+  inradius: 10,
+});
+const sweep = (auto, sweepFill = "line") => ({ ...DEFAULT_ORDER, mode: "auto", auto, sweepFill });
+const spansById = (order, panels) => {
+  const ids = resolveOrder(order, panels);
+  const spans = fillSpans(order, panels, ids);
+  return spans && new Map(ids.map((id, k) => [id, spans[k]]));
+};
+
+test("a line shares the goal out by distance: panels side by side fill together, and a gap is a stretch", () => {
+  // 1 and 2 share a column; a gap; then 3 and 4. The wall runs from x = -10 to x = 130 (140 long).
+  const panels = [square(1, 0, 0), square(2, 0, 40), square(3, 100, 0), square(4, 120, 0)];
+  const right = spansById(sweep("left-right"), panels);
+  assert.deepEqual(right.get(1), right.get(2), "one column, one span");
+  assert.equal(right.get(1).start, 0);
+  assert.equal(right.get(1).span, 20 / 140);
+  assert.equal(right.get(3).start, 100 / 140, "the gap takes its share of the goal");
+  assert.equal(right.get(4).start + right.get(4).span, 1);
+  const left = spansById(sweep("right-left"), panels);
+  assert.equal(left.get(4).start, 0);
+  assert.equal(left.get(1).start + left.get(1).span, 1);
+  // Bottom-up (layout y points up): the row at y = 0 fills together, 2 above it last.
+  const up = spansById(sweep("bottom-up"), panels);
+  for (const id of [1, 3, 4]) assert.equal(up.get(id).start, 0, `panel ${id}`);
+  assert.equal(up.get(2).start + up.get(2).span, 1);
+  const down = spansById(sweep("top-down"), panels);
+  assert.equal(down.get(2).start, 0);
+});
+
+test("only a sweep set to fill as a line has spans: one panel at a time, the path, a shuffle and your own don't", () => {
+  const panels = panelsOf("theduck");
+  assert.equal(fillsAsLine(sweep("left-right")), true);
+  for (const order of [
+    sweep("left-right", "panels"),
+    sweep("path"),
+    { ...sweep("left-right"), mode: "random" },
+    { ...sweep("left-right"), mode: "custom" },
+  ]) {
+    assert.equal(fillsAsLine(order), false, JSON.stringify(order));
+    assert.equal(fillSpans(order, panels, resolveOrder(order, panels)), null, JSON.stringify(order));
+  }
+  assert.equal(DEFAULT_ORDER.sweepFill, "line", "a sweep fills as a line until the user says otherwise");
+});
+
+test("on every wall, direction and rotation a line's spans cover the goal from 0 to 1, in the sweep's order", () => {
+  for (const name of WALLS) {
+    for (const rotation of [0, 90, 210]) {
+      const panels = panelsOf(name, rotation);
+      for (const auto of AUTO_ORDERS.filter((a) => a !== "path")) {
+        const order = sweep(auto);
+        const ids = resolveOrder(order, panels);
+        const spans = fillSpans(order, panels, ids);
+        const where = `${name} ${rotation}° ${auto}`;
+        assert.equal(spans.length, ids.length, where);
+        assert.equal(Math.min(...spans.map((s) => s.start)), 0, where);
+        assert.ok(Math.abs(Math.max(...spans.map((s) => s.start + s.span)) - 1) < 1e-9, where);
+        for (const s of spans) assert.ok(s.start >= 0 && s.span > 0 && s.start + s.span <= 1 + 1e-9, where);
+      }
+    }
+  }
 });

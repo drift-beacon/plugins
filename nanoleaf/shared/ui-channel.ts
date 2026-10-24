@@ -15,10 +15,13 @@ export interface PairResult {
   readonly panels: number;
 }
 
-/** A `preview` request: the wall shows it for `ttlMs` (default 4000); `none` ends the asking copy's preview. */
+/**
+ * A `preview` request: the wall shows it for `ttlMs` (default 4000); `none` ends the asking copy's preview. `draft` is
+ * tap to order holding the wall: `panelIds` are the panels numbered so far.
+ */
 export interface PreviewRequest {
-  readonly mode: "none" | "identify" | "fill" | "order";
-  /** identify: the panels to light. */
+  readonly mode: "none" | "identify" | "fill" | "order" | "draft";
+  /** identify: the panels to light; draft: the panels numbered so far. */
   readonly panelIds?: readonly number[];
   /** fill: how much of the goal to show, 0–1. */
   readonly fraction?: number;
@@ -82,7 +85,7 @@ export const PAIR_INPUT: ValueSchema = {
 export const PREVIEW_INPUT: ValueSchema = {
   type: "object",
   properties: {
-    mode: { type: "string", enum: ["none", "identify", "fill", "order"] },
+    mode: { type: "string", enum: ["none", "identify", "fill", "order", "draft"] },
     panelIds: { type: "array", items: { type: "integer" } },
     fraction: { type: "number", minimum: 0, maximum: 1 },
     activityId: { type: ["string", "null"] },

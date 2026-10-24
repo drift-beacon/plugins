@@ -14,6 +14,9 @@ import {
   ALERT_QUEUE,
   advance,
   alerting,
+  DRAFT_MARKED,
+  DRAFT_WAITING,
+  DRAFT_YELLOW,
   EDGE_BOOST,
   EDGE_MS,
   easeInOutCubic,
@@ -25,6 +28,7 @@ import {
   isAnimating,
   withAlert,
   LEAP,
+  orderSweep,
   orderSweepMs,
   PREVIEW_FADE_MS,
   PULSE_LOW,
@@ -464,6 +468,9 @@ test("order preview: a sweep along the order that loops every P", () => {
   closeAll(levels(state, P), [0.1, 0.1, 0.1, 0.1, 0.1]);
   closeAll(levels(state, P + P / 2), [1, 1, 1, 0.55, 0.1]);
   for (const t of [300, 777, 1100]) closeAll(levels(state, t + P), levels(state, t + 2 * P), `t=${t}`);
+  // The goal preview follows the same sweep: n + 2 a period, the last two the held, lit wall.
+  assert.equal(orderSweep(ORDER.length, P / 2), (ORDER.length + 2) / 2);
+  assert.equal(orderSweep(ORDER.length, P + P / 2), orderSweep(ORDER.length, P / 2));
   // Earlier positions light first.
   const quarter = levels(state, P + P / 4);
   for (let k = 1; k < ORDER.length; k++) assert.ok(quarter[k] <= quarter[k - 1]);
@@ -592,13 +599,16 @@ test("35% of a 5-panel goal on the wall: full, three quarters, then a faint trac
 
 test("the default pinned glow and pulse stay visible on the wall, track and trough included, in the colour", () => {
   const done = [span("s0", "completed", 60, 39)];
-  const glow = wall(done, { ...DEFAULT_SETTINGS, pinnedStyle: "glow" }, NOW);
-  assert.deepEqual(glow, [[94, 43, 8], [74, 34, 7], [15, 7, 1], [15, 7, 1], [15, 7, 1]]);
+  // Goal progress on, so the track shows (it's off by default: a pin then lights the whole wall).
+  const SETTINGS = { ...DEFAULT_SETTINGS, pinnedProgress: true };
+  const glow = wall(done, { ...SETTINGS, pinnedStyle: "glow" }, NOW);
+  // At full level: the wall's brightness dims a pin (main drives it at `pinnedBrightness`), not its frames.
+  assert.deepEqual(glow, [[255, 118, 23], [198, 92, 18], [27, 12, 2], [27, 12, 2], [27, 12, 2]]);
   // The pulse at the wall's 10 Hz over a period: every panel lit and orange all the way down to its trough.
   let trough = 255;
   const seen = new Set();
   for (let t = NOW; t < NOW + PULSE_MS; t += 100) {
-    const frame = wall(done, DEFAULT_SETTINGS, t);
+    const frame = wall(done, SETTINGS, t);
     for (const rgb of frame) {
       assert.ok(orangeOn(rgb), `${rgb} at ${t - NOW}`);
       trough = Math.min(trough, rgb[0]);
@@ -608,12 +618,8 @@ test("the default pinned glow and pulse stay visible on the wall, track and trou
   assert.ok(trough >= 8, `trough ${trough}`);
   assert.ok(seen.size >= 15, `the first panel takes ${seen.size} steps over a period`);
   // A pinned goal at 0% (a new day) keeps a visible track rather than a black wall, even with the track off.
-  for (const rgb of wall([], DEFAULT_SETTINGS, NOW + 1000)) assert.ok(orangeOn(rgb), `${rgb}`);
-  for (const rgb of wall([], { ...DEFAULT_SETTINGS, pinnedStyle: "glow", track: false }, NOW)) {
-    assert.ok(orangeOn(rgb), `${rgb}`);
-  }
-  // The lowest pinned level still reads.
-  for (const rgb of wall(done, { ...DEFAULT_SETTINGS, pinnedStyle: "glow", pinnedLevel: 10 }, NOW)) {
+  for (const rgb of wall([], SETTINGS, NOW + 1000)) assert.ok(orangeOn(rgb), `${rgb}`);
+  for (const rgb of wall([], { ...SETTINGS, pinnedStyle: "glow", track: false }, NOW)) {
     assert.ok(orangeOn(rgb), `${rgb}`);
   }
 });
@@ -815,6 +821,27 @@ test("a schedule alert swells every panel together, twice, from the scene and ba
   assert.equal(isAnimating({ ...state, scene: { ...scene, style: "glow" } }, 1500), true);
 });
 
+test("tap to order: waiting panels faint warm white and numbered ones yellow, over any scene, no alert over it", () => {
+  const draft = { mode: "draft", panelIds: [12, 10], rgb: null };
+  for (const scene of [live(0.6), { ...OFF_SCENE }]) {
+    const state = withPreview(initialRenderState(scene, 0), draft, 1000);
+    const at = (t) => renderFrame(state, ALERT_ORDER, t);
+    // Faded in, then held: the scene's own colour and fill play no part.
+    for (const t of [1000 + PREVIEW_FADE_MS, 60_000]) {
+      for (const [id, light] of at(t)) {
+        const marked = draft.panelIds.includes(id);
+        assert.deepEqual(light, marked ? { rgb: DRAFT_YELLOW, level: DRAFT_MARKED } : { rgb: WARM_WHITE, level: DRAFT_WAITING });
+      }
+    }
+    // Numbering another panel changes it at once, no fade: the tap's answer on the wall.
+    const more = withPreview(state, { ...draft, panelIds: [12, 10, 14] }, 2000);
+    assert.deepEqual(renderFrame(more, ALERT_ORDER, 2000).get(14), { rgb: DRAFT_YELLOW, level: DRAFT_MARKED });
+    // A schedule alert doesn't break through it.
+    const alerted = withAlert(state, ALERT_RED, 3000);
+    assert.deepEqual(renderFrame(alerted, ALERT_ORDER, 3000 + ALERT_BEAT_MS / 2), at(3000 + ALERT_BEAT_MS / 2));
+  }
+});
+
 test("a schedule alert lights a dark wall in its own colour and leaves it dark", () => {
   const state = withAlert(initialRenderState(OFF_SCENE, 0), ALERT_RED, 0);
   for (const t of [50, 450, 900, 1350, 1900, 2250]) {
@@ -856,4 +883,28 @@ test("reduced motion holds an alert steady instead of swelling", () => {
   const a = renderFrame(state, ALERT_ORDER, ALERT_BEAT_MS / 2, { reducedMotion: true }).get(10).level;
   const b = renderFrame(state, ALERT_ORDER, ALERT_BEAT_MS, { reducedMotion: true }).get(10).level;
   assert.equal(a, b);
+});
+
+test("spans: a line fills each panel by its share of the goal, and every panel it is crossing breathes", () => {
+  // Panels 10 and 11 side by side, then three more along the sweep.
+  const spans = [
+    { start: 0, span: 0.5 },
+    { start: 0, span: 0.5 },
+    { start: 0.5, span: 0.25 },
+    { start: 0.75, span: 0.25 },
+    { start: 0.9, span: 0.1 },
+  ];
+  const at = (fraction, t) => levels(initialRenderState(live(fraction), 0), t, ORDER, { spans });
+  // At t = 0 the breath is at its low; half a period on it is at its peak.
+  closeAll(at(0.6, 0), [1, 1, 0.4, 0, 0], "60%: the two side by side full, the next part-way");
+  closeAll(at(0.6, EDGE_MS / 2), [1, 1, 0.4 + EDGE_BOOST, 0, 0], "only the panel being crossed breathes");
+  closeAll(at(0.95, EDGE_MS / 2), [1, 1, 1, 0.8 + EDGE_BOOST, 0.5 + EDGE_BOOST], "two being crossed: both breathe");
+  closeAll(at(0.25, 0), [0.5, 0.5, 0, 0, 0], "panels side by side fill together");
+  // Without spans, the same goal fills one panel at a time.
+  closeAll(levels(initialRenderState(live(0.6), 0), 0), [1, 1, 1, 0, 0]);
+  // A goal previewed on the drawing fills the same way, over the faint track.
+  const preview = withPreview(initialRenderState(live(null), 0), { mode: "fill", fraction: 0.6, rgb: null }, 0);
+  closeAll(levels(preview, PREVIEW_FADE_MS, ORDER, { spans }), [1, 1, TRACK + (1 - TRACK) * 0.4, TRACK, TRACK]);
+  // Spans that don't match the order are ignored rather than misread.
+  closeAll(levels(initialRenderState(live(0.6), 0), 0, ORDER, { spans: spans.slice(1) }), [1, 1, 1, 0, 0]);
 });

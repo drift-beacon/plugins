@@ -70,16 +70,15 @@ export function onWall(model: NanoleafModel): { readonly showing: boolean; reado
 }
 
 /**
- * What dragging Max brightness does on the wall: adjusts the scene main is showing, lights a preview when nothing
- * is live or pinned, or nothing while main can't drive the wall. Decided from the scene, not from whether main is in
- * control, so the preview it starts doesn't flip the hint mid-drag.
+ * Whether dragging a brightness slider can light its preview on the wall: not while main can't drive it (stopped,
+ * unreachable, switched off, another app or user holding it). A preview main is showing (the slider's own) still
+ * can, so it doesn't flip mid-drag.
  */
-export function brightnessFeedback(model: NanoleafModel, scene: Scene): "adjust" | "preview" | "none" {
+export function canPreviewBrightness(model: NanoleafModel): boolean {
   const { output } = model;
-  if (model.mainStatus !== "running" || model.connection?.status !== "connected" || !output) return "none";
-  if (!model.settings.enabled || output.mode === "busy" || output.mode === "yielded") return "none";
-  if (lightCount(model.layout) === 0) return "none";
-  return scene.kind === "off" ? "preview" : "adjust";
+  if (model.mainStatus !== "running" || model.connection?.status !== "connected" || !output) return false;
+  if (!model.settings.enabled || output.mode === "busy" || output.mode === "yielded") return false;
+  return lightCount(model.layout) > 0;
 }
 
 /** Text as a sentence: trimmed, with a full stop unless it already ends in punctuation (platform reasons don't). */

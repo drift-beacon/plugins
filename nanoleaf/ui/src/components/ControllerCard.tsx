@@ -1,4 +1,4 @@
-import { Button, Switch, Tooltip } from "@heroui/react";
+import { Button, Tooltip } from "@heroui/react";
 import { cn } from "@heroui/theme";
 import { RotateCw } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
@@ -6,6 +6,7 @@ import { useState } from "react";
 import { useModel } from "../model.ts";
 import { EASE_IN_OUT } from "../motion.ts";
 import { ForgetButton } from "./ForgetButton.tsx";
+import { useSettingsGroups } from "./SettingsPanel.tsx";
 import { address } from "./format.ts";
 import { SwitchRow } from "./SwitchRow.tsx";
 
@@ -88,9 +89,10 @@ function ControllerRow() {
   );
 }
 
-/** Controller details and the switch that lets Drift Beacon drive it, above the wall. */
+/** Controller details, the switch that lets Drift Beacon drive it, and what the wall does when nothing is going on. */
 export function ControllerCard() {
   const { controller, settings, actions } = useModel();
+  const { idle, saveError: idleError } = useSettingsGroups();
   const [saveError, setSaveError] = useState<string | null>(null);
   if (!controller) return null;
 
@@ -122,66 +124,14 @@ export function ControllerCard() {
           </div>
         )}
       </div>
-    </section>
-  );
-}
-
-/**
- * The controller as one line, for the foot of the wall's own card: what it is, whether Drift Beacon drives it, and
- * the two things you do to it.
- */
-export function ControllerStrip() {
-  const { controller, connection, settings, actions } = useModel();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  if (!controller) return null;
-  const name = connection?.name ?? controller.name ?? "Nanoleaf controller";
-  const status = connection?.status;
-  const dot =
-    status === "connected"
-      ? "bg-success"
-      : status === "connecting"
-        ? "bg-warning"
-        : status === "unreachable" || status === "unauthorized"
-          ? "bg-danger"
-          : "bg-default-300";
-  const run = (action: () => Promise<void>) => {
-    setError(null);
-    setBusy(true);
-    action()
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setBusy(false));
-  };
-  return (
-    <section aria-label="Controller" className="flex items-center gap-3 bg-content1 px-4 py-2.5">
-      <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full transition-colors duration-300", dot)} />
-      <span className="truncate font-medium text-sm">{name}</span>
-      <span role="status" className={cn("min-w-0 flex-1 truncate text-xs tabular-nums", error ? "text-danger" : "text-default-500")}>
-        {error ?? [connection?.model ?? controller.model, address(controller.host, controller.port)].filter(Boolean).join(" · ")}
-      </span>
-      <Switch
-        size="sm"
-        isSelected={settings.enabled}
-        onValueChange={(enabled) => run(() => actions.saveSettings({ enabled }))}
-        classNames={{ base: "flex-row-reverse gap-2", wrapper: "me-0", label: "ms-0 text-sm" }}
-      >
-        Drive my Nanoleaf
-      </Switch>
-      <Tooltip content="Reconnect and read the layout again" delay={400} closeDelay={0}>
-        <Button
-          isIconOnly
-          size="sm"
-          variant="flat"
-          radius="lg"
-          aria-label="Refresh"
-          isDisabled={busy}
-          onPress={() => run(actions.refresh)}
-          className="active:scale-[0.9]"
-        >
-          <RotateCw className="h-4 w-4" />
-        </Button>
-      </Tooltip>
-      <ForgetButton name={name} onForget={actions.forget} />
+      <div className="border-default-100 border-t">
+        {idle}
+        {idleError && (
+          <div role="status" className="-mt-2 px-4 pb-4 text-danger text-xs">
+            {idleError}
+          </div>
+        )}
+      </div>
     </section>
   );
 }

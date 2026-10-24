@@ -1,8 +1,10 @@
 import { cn } from "@heroui/theme";
 import type { ReactNode } from "react";
-import { ControllerStrip } from "./ControllerCard.tsx";
+import { ControllerCard } from "./ControllerCard.tsx";
 import { NowCard } from "./NowCard.tsx";
 import { useSettingsGroups } from "./SettingsPanel.tsx";
+import { Starfield } from "./Starfield.tsx";
+import { HORIZON_OVERLAP } from "./wall/Horizon.tsx";
 import type { WallParts } from "./wall/WallSection.tsx";
 
 /**
@@ -27,22 +29,37 @@ function StateCard({ children, className }: { children: ReactNode; className?: s
 }
 
 /**
- * The wide layout. Two cards on top: the wall as one thing (the drawing, what it shows now, its controller and its
- * brightness) and how it fills (the goal preview and the fill order). Under them the settings are the wall's
- * situations, one card each: an activity pinned, a session live, a schedule firing, nothing going on, other plugins.
+ * The wide layout, two columns that share the weight so both end near the same line. The wall's column is what you
+ * look at, with no card: the drawing hangs in a patch of night sky (twinkling stars that fade into the page at every
+ * edge), its light lying under it as a horizon, and what it shows now sitting on that line, with how bright under it. The side is what you change (how it fills, then the controller
+ * with what the wall does when nothing is going on). Under them the settings are the wall's situations, one card
+ * each: an activity pinned, a session live, a schedule firing, other plugins.
  */
 export function Board({ parts }: { parts: WallParts }) {
   const light = useSettingsGroups();
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-[minmax(0,1fr)_380px] items-stretch gap-4">
-        <div className={MERGED}>
-          {parts.stage}
-          <NowCard />
-          <ControllerStrip />
-          {light.brightness}
+      <div className="grid grid-cols-[minmax(0,1fr)_380px] items-start gap-4">
+        <div>
+          <div className="relative">
+            <div className="night-sky pointer-events-none absolute -inset-x-10 -top-10 -bottom-4">
+              <Starfield />
+            </div>
+            <div className="relative">{parts.stage}</div>
+          </div>
+          <div className="relative divide-y divide-default-100/60" style={{ marginTop: -HORIZON_OVERLAP }}>
+            {/* Over the drawing's foot only as words and light: presses fall through to the panels underneath. */}
+            <div className="pointer-events-none">
+              <NowCard bare />
+            </div>
+            {light.brightness}
+            {light.pinnedBrightness}
+          </div>
         </div>
-        <FillCard parts={parts} />
+        <div className="space-y-4">
+          <FillCard parts={parts} />
+          <ControllerCard />
+        </div>
       </div>
       <div className="flex items-baseline justify-between gap-3 px-1 pt-1">
         <h2 className="font-semibold text-sm">What the wall does</h2>
@@ -54,8 +71,7 @@ export function Board({ parts }: { parts: WallParts }) {
         <StateCard className="row-span-2">{light.pinned}</StateCard>
         <StateCard>{light.track}</StateCard>
         <StateCard>{light.schedule}</StateCard>
-        <StateCard>{light.idle}</StateCard>
-        <StateCard>{light.plugins}</StateCard>
+        <StateCard className="col-span-2">{light.plugins}</StateCard>
       </div>
     </div>
   );

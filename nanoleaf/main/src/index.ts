@@ -1,7 +1,8 @@
 /**
  * Nanoleaf: glows Nanoleaf Shapes in the colour of the user's live activity and fills them towards its goal. onStart
  * wires the Controller (connection, pairing, layout, events) to the Director (scene → frames, hand-back, yield),
- * answers the interface's requests on the private channel (`ctx.ui`) and handles the one declared command, `resume`.
+ * answers the interface's requests on the private channel (`ctx.ui`) and handles the declared commands: `resume`, the
+ * wall's lock for other plugins and Home Assistant, and the two brightness settings (brightness.ts).
  * It never waits on the device: connecting starts once onStart returns.
  */
 import {
@@ -14,9 +15,10 @@ import {
   type Session,
 } from "@drift-beacon/plugin";
 import { readEffect } from "../../shared/effects.ts";
-import { DEFAULT_PORT } from "../../shared/storage.ts";
+import { DEFAULT_PORT, readSettings } from "../../shared/storage.ts";
 import { type ActivityLike, type FoundController, type SessionLike, STORAGE_KEYS } from "../../shared/types.ts";
 import { BRIGHTNESS_INPUT, DISCOVER_INPUT, PAIR_INPUT, PREVIEW_INPUT } from "../../shared/ui-channel.ts";
+import { brightnessState, saveBrightness } from "./brightness.ts";
 import { createOwner } from "./claims.ts";
 import { Controller, type ControllerTimings } from "./controller.ts";
 import { createDirector, type Director, type DirectorTimings } from "./director.ts";
@@ -137,6 +139,12 @@ export function startNanoleaf(ctx: MainContext, options: NanoleafPluginOptions =
   ctx.commands.handle("releaseControl", (input, meta) =>
     director.releaseControl(holderOf(meta.caller), input.leaseId),
   );
+  ctx.commands.handle("setSessionBrightness", (input) => saveBrightness(ctx.storage, "session", input.brightness));
+  ctx.commands.handle("setPinnedBrightness", (input) => saveBrightness(ctx.storage, "pinned", input.brightness));
+  const publishBrightness = () =>
+    ctx.state.set("brightness", brightnessState(readSettings(ctx.storage.get(STORAGE_KEYS.settings))));
+  // Bound by the brightness controls: published before onStart returns, then on every change of the settings.
+  publishBrightness();
   ctx.onDataChange(() => director.update());
   // A schedule fired: the snapshot with its pin came first, so the wall is already on its way to the new scene.
   ctx.schedules.onTriggered((trigger) => {
@@ -145,6 +153,7 @@ export function startNanoleaf(ctx: MainContext, options: NanoleafPluginOptions =
   ctx.storage.onChange((key) => {
     if (key === STORAGE_KEYS.controller) wired.reload();
     else if (key === STORAGE_KEYS.settings || key === STORAGE_KEYS.order || key === STORAGE_KEYS.layout) {
+      if (key === STORAGE_KEYS.settings) publishBrightness();
       director.update();
     }
   });

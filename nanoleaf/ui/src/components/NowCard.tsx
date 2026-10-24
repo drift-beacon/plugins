@@ -2,6 +2,7 @@ import { cn } from "@heroui/theme";
 import { Hexagon } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useCallback, useRef } from "react";
+import { fillsAsLine } from "../../../shared/order.ts";
 import { describeProgress } from "../../../shared/scene.ts";
 import { cssRgb } from "../../../shared/color.ts";
 import type { ActivityLike, ControlScene, Scene } from "../../../shared/types.ts";
@@ -92,14 +93,17 @@ function StatusPill({ status, scene }: { status: WallStatus; scene: Scene }) {
   );
 }
 
-/** Goal text and the panel bar, with a small percentage at its right edge. */
-function Progress(props: { scene: Scene; n: number; activity: ActivityLike; muted: boolean }) {
-  const { scene, n, activity, muted } = props;
+/**
+ * Goal text and the panel bar, with a small percentage at its right edge. A sweep filling as a line is a distance,
+ * not a count of panels: its bar is one track.
+ */
+function Progress(props: { scene: Scene; n: number; line: boolean; activity: ActivityLike; muted: boolean }) {
+  const { scene, n, line, activity, muted } = props;
   const progress = scene.progress;
   if (!progress) return null;
   const copy = describeProgress(progress, activity.trackingType);
   const description =
-    n > 0
+    n > 0 && !line
       ? `${Math.round(Math.min(Math.max(progress.fraction, 0), 1) * n * 10) / 10} of ${n} panels lit. ${panelLine(progress.fraction, n)}`
       : `${copy.percent}% of goal completed`;
   return (
@@ -108,7 +112,13 @@ function Progress(props: { scene: Scene; n: number; activity: ActivityLike; mute
         {copy.currentLabel} of {copy.targetLabel} {copy.periodLabel}
       </div>
       <div className="mt-1.5 flex items-center gap-2.5">
-        <PanelBar className="min-w-0 flex-1" scene={scene} n={Math.max(n, 1)} muted={muted} ariaLabel={description} />
+        <PanelBar
+          className="min-w-0 flex-1"
+          scene={scene}
+          n={line ? 1 : Math.max(n, 1)}
+          muted={muted}
+          ariaLabel={description}
+        />
         <span
           className={cn(
             "shrink-0 font-medium text-xs tabular-nums",
@@ -128,7 +138,7 @@ function noGoalLine(model: NanoleafModel, scene: Scene, activity: ActivityLike):
   if (scene.kind === "pinned" && activity.goal && !model.settings.pinnedProgress) {
     return "Goal progress is hidden for pins: turn on Show goal progress below.";
   }
-  const level = scene.kind === "pinned" ? ` at ${Math.round(scene.level * 100)}%` : "";
+  const level = scene.kind === "pinned" ? ` at ${model.settings.pinnedBrightness}%` : "";
   return `No goal on this activity, so every panel glows${level}.`;
 }
 
@@ -169,7 +179,7 @@ function ActivityNow({ model, scene, activity, away }: ActivityNowProps) {
         )}
       </div>
       {scene.progress ? (
-        <Progress scene={scene} n={n} activity={activity} muted={muted} />
+        <Progress scene={scene} n={n} line={fillsAsLine(model.order)} activity={activity} muted={muted} />
       ) : (
         <div className="mt-4">
           <PanelBar
@@ -254,9 +264,10 @@ function NothingNow({ model }: { model: NanoleafModel }) {
  * What the wall shows now: the activity in its colour, the goal as numbers that tick each second, and a bar that
  * fills like the panels do. The wall shows it only while main drives it (`output.inControl`); otherwise the card
  * shows it greyed as what would show, with its status in the badge. A different scene swaps in with a short blurred
- * crossfade, so it reads as one card changing rather than two cards trading places.
+ * crossfade, so it reads as one card changing rather than two cards trading places. `bare` (the board's night sky):
+ * no surface and no colour wash, the words and bar on the sky.
  */
-export function NowCard() {
+export function NowCard({ bare = false }: { bare?: boolean } = {}) {
   const model = useModel();
   const scene = useScene();
   const reduced = useReducedMotion();
@@ -285,11 +296,11 @@ export function NowCard() {
   return (
     <section
       aria-label="What your wall shows"
-      className="relative overflow-hidden rounded-2xl bg-content1 ring-1 ring-default-100"
+      className={cn("relative overflow-hidden", !bare && "rounded-2xl bg-content1 ring-1 ring-default-100")}
     >
       {/* The wash follows the colour: keyed by it, so a new activity's light fades in over the old one. */}
       <AnimatePresence initial={false}>
-        {activity && (
+        {activity && !bare && (
           <motion.div
             key={activity.color}
             aria-hidden

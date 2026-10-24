@@ -7,14 +7,23 @@
 import { parseColor, toLedRgb, WARM_WHITE } from "../../shared/color.ts";
 import { effectDuration, type EffectSpec, sameSpec } from "../../shared/effects.ts";
 import { placeLayout } from "../../shared/geometry.ts";
-import { resolveOrder } from "../../shared/order.ts";
-import { advance, alerting, fromDark, initialRenderState, withAlert, withPreview } from "../../shared/render.ts";
+import { fillSpans, resolveOrder } from "../../shared/order.ts";
+import {
+  advance,
+  alerting,
+  DRAFT_BRIGHTNESS,
+  fromDark,
+  initialRenderState,
+  withAlert,
+  withPreview,
+} from "../../shared/render.ts";
 import { decideScene, OFF_SCENE } from "../../shared/scene.ts";
 import { DEFAULT_SETTINGS, readLayout, readOrder, readSettings } from "../../shared/storage.ts";
 import {
   type ControlEffect,
   type ControlInfo,
   type ControllerConfig,
+  type FillSpan,
   type OutputInfo,
   type Preview,
   type RenderState,
@@ -177,6 +186,8 @@ export class Director {
   #scene: Scene = OFF_SCENE;
   #render: RenderState | null = null;
   #order: readonly number[] = [];
+  /** Each panel's share of a goal when the order fills as a line (null one panel at a time), parallel to `#order`. */
+  #spans: readonly FillSpan[] | null = null;
   #orderKey = "";
   #lastRecompute = -Infinity;
   #yieldedKey: string | null = null;
@@ -324,7 +335,9 @@ export class Director {
    * The `preview` request: anything but `none` shows over the scene until `ttlMs` passes (repeat it to renew), held
    * by `owner`, the interface copy that asked; the latest request takes the wall, whoever held it. `none` ends the
    * lease only for its holder: one copy closing its editor doesn't end a preview another copy is showing. The colour
-   * is the named activity's, else the scene's. `shown`: it is (or is becoming) in control.
+   * is the named activity's, else the scene's. A `draft` (tap to order) holds the wall in its own colours at
+   * `DRAFT_BRIGHTNESS`, takes it even from a yield, and keeps schedule alerts off it. `shown`: it is (or is becoming)
+   * in control.
    */
   preview(request: PreviewRequest, owner: string | null = null): { shown: boolean } {
     if (this.#stopped) return { shown: false };
@@ -335,12 +348,15 @@ export class Director {
       return { shown: false };
     }
     const rgb = this.#colourOf(request.activityId ?? null);
+    const panelIds = (request.panelIds ?? []).filter((id) => Number.isInteger(id));
     const preview: Preview =
       request.mode === "identify"
-        ? { mode: "identify", panelIds: (request.panelIds ?? []).filter((id) => Number.isInteger(id)), rgb }
-        : request.mode === "fill"
-          ? { mode: "fill", fraction: Math.min(1, Math.max(0, request.fraction ?? 0)), rgb }
-          : { mode: "order", rgb };
+        ? { mode: "identify", panelIds, rgb }
+        : request.mode === "draft"
+          ? { mode: "draft", panelIds, rgb: null }
+          : request.mode === "fill"
+            ? { mode: "fill", fraction: Math.min(1, Math.max(0, request.fraction ?? 0)), rgb }
+            : { mode: "order", rgb };
     this.#lease = { preview, until: now + (request.ttlMs ?? this.timings.previewTtlMs), owner };
     this.#render = withPreview(this.#render ?? initialRenderState(this.#scene, now), preview, now);
     this.#evaluate(now);
@@ -360,7 +376,8 @@ export class Director {
 
   /**
    * A schedule just fired for this activity: the wall swells twice in its colour (warm white when it has none), over
-   * whatever shows, a preview included. When the plugin isn't driving the wall it takes it for the alert, which starts
+   * whatever shows, a preview included, but not tap to order, whose alert is dropped. When the plugin isn't driving the
+   * wall it takes it for the alert, which starts
    * once the wall is its own; an alert that can't start within `alertWaitMs` is dropped, never played late (the wall
    * is yielded, someone else's, disconnected, or driven by static writes, which can't swell). Nothing happens with
    * the `scheduleAlert` setting or driving switched off. `shown`: it plays, or the wall is being taken for it.
@@ -370,6 +387,7 @@ export class Director {
     const now = this.#now();
     this.#recompute(now);
     if (!this.#settings.enabled || !this.#settings.scheduleAlert) return { shown: false };
+    if (this.#drafting) return { shown: false };
     const rgb = this.#colourOf(activityId) ?? WARM_WHITE;
     const session = this.#wall.session;
     if (session) {
@@ -484,7 +502,7 @@ export class Director {
     return now >= held.until || !this.#settings.enabled || !this.#settings.allowControl;
   }
 
-  /** The `brightness` request: overrides the maximum for `overrideMs`, applied at once when in control. */
+  /** The `brightness` request: overrides Session brightness for `overrideMs`, applied at once when in control. */
   brightness(value: number): { applied: boolean } {
     if (this.#stopped) return { applied: false };
     const now = this.#now();
@@ -517,6 +535,11 @@ export class Director {
 
   /* ---- Scene ---- */
 
+  /** Tap to order holds the wall (the running lease is a `draft`). */
+  get #drafting(): boolean {
+    return this.#lease?.preview.mode === "draft";
+  }
+
   #endLease(now: number): void {
     if (!this.#lease) return;
     this.#lease = null;
@@ -524,10 +547,17 @@ export class Director {
     this.#evaluate(now);
   }
 
-  /** The brightness to drive at: a running `brightness` override, else the setting. */
+  /**
+   * The brightness to drive at: tap to order's own while it holds the wall, else a running `brightness` override (a
+   * slider being dragged), else a showing pin's own brightness, else Session brightness. A preview over a pin shows at
+   * Session brightness, so it's seen however dim the pin is.
+   */
   #targetBrightness(now: number): number {
+    if (this.#drafting) return DRAFT_BRIGHTNESS;
     const override = this.#override;
-    return override && now < override.until ? override.value : this.#settings.maxBrightness;
+    if (override && now < override.until) return override.value;
+    if (this.#scene.kind === "pinned" && !this.#lease) return this.#settings.pinnedBrightness;
+    return this.#settings.maxBrightness;
   }
 
   #recompute(now: number): void {
@@ -583,10 +613,15 @@ export class Director {
     if (key === this.#orderKey) return;
     this.#orderKey = key;
     const layout = readLayout(layoutRaw);
-    this.#order =
-      layout && controllerId !== null && layout.controllerId === controllerId
-        ? resolveOrder(readOrder(orderRaw), placeLayout(layout, settings.viewRotation).panels)
-        : [];
+    if (!layout || controllerId === null || layout.controllerId !== controllerId) {
+      this.#order = [];
+      this.#spans = null;
+      return;
+    }
+    const order = readOrder(orderRaw);
+    const panels = placeLayout(layout, settings.viewRotation).panels;
+    this.#order = resolveOrder(order, panels);
+    this.#spans = fillSpans(order, panels, this.#order);
   }
 
   #colourOf(activityId: string | null): Rgb | null {
@@ -608,6 +643,7 @@ export class Director {
       enabled: this.#settings.enabled,
       scene: this.#scene,
       previewActive: this.#lease !== null,
+      draftActive: this.#drafting,
       alertActive: this.#waiting.length > 0 || (this.#render !== null && alerting(this.#render, this.#now())),
       yieldedKey: this.#yieldedKey,
       claimedElsewhere: claim !== null && claim.token !== this.#o.owner.token,
@@ -696,7 +732,7 @@ export class Director {
   }
 
   #frame(now: number, session: Session): void {
-    if (this.#render && this.#order.length > 0) sendFrame(this.#host, session, this.#render, this.#order, now);
+    if (this.#render && this.#order.length > 0) sendFrame(this.#host, session, this.#render, this.#order, now, this.#spans);
   }
 
   /* ---- Yield ---- */

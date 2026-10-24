@@ -71,6 +71,18 @@ export function stageHeight(placed: PlacedLayout, width: number, maxHeight: numb
   return Math.round(Math.min(maxHeight, Math.max(Math.min(MIN_HEIGHT, maxHeight), h * scale + 2 * pad)));
 }
 
+/** The drawing's height: fitted to this view, or, given `turns`, the tallest of them so a turn never resizes it. */
+export function steadyHeight(
+  placed: PlacedLayout,
+  turns: readonly PlacedLayout[] | undefined,
+  width: number,
+  maxHeight: number,
+): number {
+  let height = stageHeight(placed, width, maxHeight);
+  for (const view of turns ?? []) height = Math.max(height, stageHeight(view, width, maxHeight));
+  return height;
+}
+
 /**
  * Projects a placed layout into a `width` × `height` stage: fitted, centred, each panel's paths ready to draw. `pad`
  * defaults to the stage's breathing room; a thumbnail passes its own.

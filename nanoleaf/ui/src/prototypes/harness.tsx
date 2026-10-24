@@ -56,6 +56,9 @@ const variants: Variant[] = [
   simVariant("First run", null, "live-goal"),
 ];
 
+// At phone width the layout's tab bar owns the bottom: the picker and simulator go to the top, the simulator folded.
+const narrow = window.matchMedia("(max-width: 767px)").matches;
+
 // One root across hot updates: an edit to a module this one imports re-runs it.
 const root: Root = import.meta.hot?.data.root ?? createRoot(document.getElementById("proto-root")!);
 if (import.meta.hot) import.meta.hot.data.root = root;
@@ -63,8 +66,8 @@ if (import.meta.hot) import.meta.hot.data.root = root;
 root.render(
   <HeroUIProvider>
     <MotionConfig reducedMotion="user">
-      <PickerHarness variants={variants} />
-      <SimPanel />
+      <PickerHarness variants={variants} position={narrow ? "top" : "bottom"} />
+      <SimPanel collapsed={narrow} top={narrow} />
     </MotionConfig>
   </HeroUIProvider>,
 );

@@ -5,7 +5,7 @@
 import { deviceRgb } from "../../shared/color.ts";
 import { staticAnimData, staticDisplay } from "../../shared/protocol.ts";
 import { renderFrame } from "../../shared/render.ts";
-import type { Handback, RenderState, Rgb } from "../../shared/types.ts";
+import type { FillSpan, Handback, RenderState, Rgb } from "../../shared/types.ts";
 import type { DirectorTimings } from "./director.ts";
 import type { DirectorClient, DirectorStream, Log, Timers } from "./ports.ts";
 import { frameChanged, throttleWait, type FrameEntry } from "./policy.ts";
@@ -59,9 +59,17 @@ export interface SessionHost {
   isCurrent(session: Session): boolean;
 }
 
-/** The device colours for `order` at time `now`: renderFrame through `deviceRgb` (drive floor, hue kept). */
-export function frameAt(render: RenderState, order: readonly number[], now: number): FrameEntry[] {
-  const lights = renderFrame(render, order, now);
+/**
+ * The device colours for `order` at time `now`: renderFrame through `deviceRgb` (drive floor, hue kept). `spans` is
+ * each panel's share of a goal when the order fills as a line.
+ */
+export function frameAt(
+  render: RenderState,
+  order: readonly number[],
+  now: number,
+  spans: readonly FillSpan[] | null = null,
+): FrameEntry[] {
+  const lights = renderFrame(render, order, now, { spans });
   return order.map((id) => {
     const light = lights.get(id);
     return [id, light ? deviceRgb(light) : DARK];
@@ -78,8 +86,9 @@ export function sendFrame(
   render: RenderState,
   order: readonly number[],
   now: number,
+  spans: readonly FillSpan[] | null = null,
 ): boolean {
-  const frame = frameAt(render, order, now);
+  const frame = frameAt(render, order, now, spans);
   const { keepAliveMs, staticIntervalMs } = host.timings;
   if (session.mode === "stream") {
     if (!frameChanged(session.lastFrame, frame) && now - session.lastSentAt < keepAliveMs) return false;

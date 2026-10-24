@@ -317,19 +317,20 @@ describe("settings switches are named by their own words (ux-13)", () => {
     ]);
   });
 
-  test("the words are inside the switch's own label, so clicking them toggles it", (t) => {
+  test("only the switch takes a press: its words sit beside it, so a finger on them scrolls", (t) => {
     t.mock.method(Date, "now", () => T0);
     const tree = parse(render(model(), ui.ControllerCard) + render(model(), ui.SettingsPanel));
     const labels = findAll(tree, (n) => n.tag === "label" && findAll(n, (c) => c.attrs.role === "switch").length > 0);
     assert.equal(labels.length, 5);
-    for (const label of labels) assert.match(squash(spoken(label)), /\w+ .*\. ?$/, "label text and description");
+    for (const label of labels) assert.equal(squash(spoken(label)), "", "nothing but the switch in its label");
   });
 
-  test("Pinned brightness says it is a share of Max brightness", (t) => {
+  test("a session's brightness and a pin's are two settings, each a plain percent", (t) => {
     t.mock.method(Date, "now", () => T0);
     const markup = render(model(), ui.SettingsPanel);
-    assert.match(markup, /Pinned brightness, as a share of Max brightness/);
-    assert.match(markup, /% of max/);
+    assert.match(markup, /Session brightness/);
+    assert.match(markup, /Pinned brightness/);
+    assert.doesNotMatch(markup, /share of|% of max|Max brightness/);
   });
 });
 

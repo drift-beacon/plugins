@@ -3,6 +3,7 @@ import { Check, Eraser, Hand, MousePointerClick, Undo2 } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { cssRgb } from "../../../../shared/color.ts";
 import type { Rgb } from "../../../../shared/types.ts";
+import { useMediaQuery } from "../../hooks/useMediaQuery.ts";
 import { Odometer } from "./Odometer.tsx";
 
 /** A button with nothing to do yet: faded and inert, but still focusable. */
@@ -28,7 +29,8 @@ interface DraftPanelProps {
 /**
  * Tap to order, the editor's side: what to do, how far along ("3 of 8"), and Undo / Start over / Cancel / Done.
  * Backspace undoes and Escape cancels, from anywhere but a text field. Undo, Start over and Done stay focusable when
- * there is nothing to act on (aria-disabled), so undoing down to zero never drops keyboard focus to the page.
+ * there is nothing to act on (aria-disabled), so undoing down to zero never drops keyboard focus to the page. The
+ * keys are only mentioned where a mouse or trackpad suggests a keyboard: a phone's hint is about tapping alone.
  */
 export function DraftPanel(props: DraftPanelProps) {
   const { source, count, total, accent, autoFocus, onUndo, onReset, onCancel, onDone } = props;
@@ -50,8 +52,16 @@ export function DraftPanel(props: DraftPanelProps) {
     return () => window.removeEventListener("keydown", onKey);
   }, [count, onCancel, onUndo]);
 
+  const keyboard = useMediaQuery("(any-pointer: fine)");
   const wall = source === "wall";
   const left = total - count;
+  const keys = keyboard ? "Backspace undoes, Escape cancels." : "";
+  const hint =
+    count > 0 && left > 0
+      ? `Done adds the ${left} ${left === 1 ? "panel" : "panels"} you haven't tapped at the end, in path order.`
+      : wall
+        ? `You can tap the drawing too. ${keys}`.trim()
+        : keys;
   return (
     <div
       ref={root}
@@ -143,13 +153,7 @@ export function DraftPanel(props: DraftPanelProps) {
           </Button>
         </div>
       </div>
-      <p className="text-default-500 text-xs">
-        {count > 0 && left > 0
-          ? `Done adds the ${left} ${left === 1 ? "panel" : "panels"} you haven't tapped at the end, in path order.`
-          : wall
-            ? "You can tap the drawing too. Backspace undoes, Escape cancels."
-            : "Backspace undoes, Escape cancels."}
-      </p>
+      {hint && <p className="text-default-500 text-xs">{hint}</p>}
     </div>
   );
 }

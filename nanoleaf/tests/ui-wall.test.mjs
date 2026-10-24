@@ -5,8 +5,8 @@ import { readdirSync } from "node:fs";
 import { lightOpacity } from "../shared/color.ts";
 import { layoutFromPanelLayout, placeLayout } from "../shared/geometry.ts";
 import { resolveOrder } from "../shared/order.ts";
-import { initialRenderState, orderSweepMs, renderFrame, withPreview } from "../shared/render.ts";
-import { OFF_SCENE, progressPercent } from "../shared/scene.ts";
+import { DRAFT_BRIGHTNESS, initialRenderState, orderSweepMs, renderFrame, withPreview } from "../shared/render.ts";
+import { OFF_SCENE } from "../shared/scene.ts";
 import {
   BADGE_BASE,
   badgeSlots,
@@ -23,8 +23,9 @@ import {
   orderForMode,
   orderForShuffle,
 } from "../ui/src/components/wall/orderModes.ts";
+import { orderChoice } from "../ui/src/components/wall/orderChoice.ts";
 import { listPointing } from "../ui/src/components/wall/pointing.ts";
-import { refusedText, scrubberReadout, stageLabel } from "../ui/src/components/wall/readout.ts";
+import { refusedText, stageLabel } from "../ui/src/components/wall/readout.ts";
 import {
   layoutStage,
   MAX_ZOOM,
@@ -32,10 +33,12 @@ import {
   smallestTarget,
   stageHeight,
   stagePadding,
+  steadyHeight,
   zoomFor,
 } from "../ui/src/components/wall/stageLayout.ts";
 import { inkOn, withAlpha } from "../ui/src/lib/color.ts";
 import { createWallLease, LEASE_MS, RENEW_MS, THROTTLE_MS } from "../ui/src/lib/lease.ts";
+import { drawnLevel, wallBrightness } from "../ui/src/lib/brightness.ts";
 import { floorGlow, panelOpacity } from "../ui/src/lib/light.ts";
 import { nextSeed, panelName } from "../ui/src/lib/panels.ts";
 import { stepRenderState } from "../ui/src/lib/renderState.ts";
@@ -295,6 +298,16 @@ describe("stage layout", () => {
     assert.ok(Math.abs(s.center[0] - (p.center[0] * stage.scale + stage.tx)) < 1e-9);
     assert.ok(Math.abs(s.center[1] - (-p.center[1] * stage.scale + stage.ty)) < 1e-9);
   });
+
+  test("a drawing sized for every turn keeps one height through a turn", () => {
+    for (const name of ["theduck", "wings"]) {
+      const turns = Array.from({ length: 12 }, (_, k) => placeLayout(fixture(name), k * 30));
+      const heights = turns.map((placed) => steadyHeight(placed, turns, 360, 306));
+      assert.equal(new Set(heights).size, 1, `${name}: ${heights}`);
+      assert.equal(heights[0], Math.max(...turns.map((placed) => stageHeight(placed, 360, 306))));
+      assert.equal(steadyHeight(turns[1], undefined, 360, 306), stageHeight(turns[1], 360, 306), "no turns: fitted");
+    }
+  });
 });
 
 /* ---- Review fixes (wall group) ---- */
@@ -428,6 +441,22 @@ describe("render state steps (ui-4)", () => {
   });
 });
 
+test("the compass: choosing what's chosen does nothing, but Shuffle chosen again rolls a fresh mix", () => {
+  const calls = [];
+  const handlers = {
+    onMode: (mode) => calls.push(`mode ${mode}`),
+    onAuto: (auto) => calls.push(`auto ${auto}`),
+    onShuffle: () => calls.push("shuffle"),
+  };
+  const order = (patch) => ({ mode: "auto", auto: "path", ids: [], seed: 1, sweepFill: "line", ...patch });
+  orderChoice(order({ mode: "random" }), handlers).chooseKind("shuffle");
+  orderChoice(order({ mode: "random" }), handlers).chooseKind("shuffle");
+  orderChoice(order({}), handlers).chooseKind("path");
+  orderChoice(order({ auto: "top-down" }), handlers).chooseDirection("top-down");
+  orderChoice(order({}), handlers).chooseKind("shuffle");
+  assert.deepEqual(calls, ["shuffle", "shuffle", "shuffle"]);
+});
+
 describe("order modes keep a hand-made order (ux-2)", () => {
   const panels = placeLayout(fixture("theduck"), 0).panels;
   const base = { mode: "auto", auto: "path", ids: [], seed: 1 };
@@ -490,21 +519,6 @@ describe("keyboard and copy", () => {
     assert.equal(rovingStep("ArrowRight", 0, 0), null);
   });
 
-  test("the scrubber rounds like the Now card: progressPercent (ux-5)", () => {
-    for (const f of [0.435, 0.525, 0.875, 0.004, 0.996, 1.4, -0.2]) {
-      assert.equal(scrubberReadout(null, f, 7).percent, progressPercent(f), `now ${f}`);
-      assert.equal(scrubberReadout(f, null, 7).value, `${progressPercent(f)}%`, `preview ${f}`);
-    }
-    assert.equal(scrubberReadout(null, 0.435, 7).value, "44%");
-    assert.equal(scrubberReadout(null, 0.435, 7).caption, "Now · panel 4 of 7 filling");
-    assert.equal(scrubberReadout(1, null, 7).caption, "all 7 panels full");
-    assert.deepEqual(scrubberReadout(null, null, 7), {
-      percent: 0,
-      value: null,
-      caption: null,
-    });
-  });
-
   test("a refused order or rotation save says what didn't save and why, instead of snapping back silently", () => {
     assert.equal(refusedText("the order", new Error("Storage is full")), "Couldn't save the order: Storage is full");
     assert.equal(refusedText("the rotation", "offline"), "Couldn't save the rotation: offline");
@@ -547,12 +561,13 @@ describe("keyboard and copy", () => {
 
   test("the stage's chrome never hard-codes white on the editor card: light themes need tokens (theme)", () => {
     // White overlays (bg-white/…) read only on the dark stage; the editor and list sit on the theme's card.
-    for (const file of ["OrderEditor.tsx", "OrderList.tsx", "DraftPanel.tsx", "MiniWall.tsx"]) {
+    for (const file of ["Compass.tsx", "OrderList.tsx", "DraftPanel.tsx", "MiniWall.tsx"]) {
       const source = readFileSync(new URL(`../ui/src/components/wall/${file}`, import.meta.url), "utf8");
       assert.doesNotMatch(source, /\b(bg|text|ring|border)-(white|black)\b/, file);
     }
     const stage = readFileSync(new URL("../ui/src/components/wall/WallStage.tsx", import.meta.url), "utf8");
-    assert.match(stage, /className="wall-stage /);
+    // The stage keeps the class that holds it dark in a light theme, card or night sky.
+    assert.match(stage, /"wall-stage /);
   });
 });
 
@@ -628,5 +643,27 @@ describe("drawing opacity matches the wall (decision 1)", () => {
     assert.deepEqual(glow.rgb, [255, 0, 0]);
     assert.ok(glow.opacity > 0 && glow.opacity <= 0.5);
     assert.deepEqual(floorGlow(new Map(), [1, 2]), { rgb: null, opacity: 0 });
+  });
+
+  test("the drawing is lit at the brightness the wall is driven at, as main picks it", () => {
+    const settings = { maxBrightness: 80, pinnedBrightness: 24 };
+    assert.equal(wallBrightness(settings, false, null, null), 80, "a session: Session brightness");
+    assert.equal(wallBrightness(settings, true, null, null), 24, "a pin: its own");
+    assert.equal(wallBrightness(settings, true, "fill", null), 80, "a preview over a pin: Session brightness");
+    for (const [pinned, preview] of [[false, null], [true, null], [true, "fill"]]) {
+      assert.equal(wallBrightness(settings, pinned, preview, 40), 40, "a slider being dragged, whatever shows");
+    }
+    for (const pinned of [false, true]) {
+      assert.equal(wallBrightness(settings, pinned, "draft", null), DRAFT_BRIGHTNESS, "tap to order: its own");
+    }
+  });
+
+  test("brightness draws on a gentle curve: full at 100%, half at 25%, still visible at 5%", () => {
+    assert.equal(drawnLevel(100), 1);
+    assert.equal(drawnLevel(25), 0.5);
+    assert.ok(drawnLevel(5) > 0.2 && drawnLevel(5) < 0.25);
+    assert.equal(drawnLevel(0), 0);
+    assert.equal(drawnLevel(140), 1);
+    for (let p = 5; p < 100; p += 5) assert.ok(drawnLevel(p) < drawnLevel(p + 5), `rises at ${p}%`);
   });
 });

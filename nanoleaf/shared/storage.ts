@@ -14,6 +14,7 @@ import type {
   PinnedStyle,
   RawPanel,
   Settings,
+  SweepFill,
 } from "./types.ts";
 
 /** What a user gets before they change anything. */
@@ -21,21 +22,23 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
   enabled: true,
   maxBrightness: 80,
   pinnedStyle: "pulse",
-  pinnedLevel: 35,
-  pinnedProgress: true,
+  // The light a pin had as 35% of the default 80: the same wall, now its own setting.
+  pinnedBrightness: 28,
+  pinnedProgress: false,
   track: true,
   scheduleAlert: true,
   allowControl: true,
-  idle: "restore",
+  idle: "off",
   viewRotation: 0,
 });
 
-/** Fill along a walk over neighbouring panels until the user picks something else. */
+/** Rise from the bottom as a straight line, like a glass filling up, until the user picks something else. */
 export const DEFAULT_ORDER: PanelOrder = Object.freeze({
   mode: "auto",
-  auto: "path",
+  auto: "bottom-up",
   ids: Object.freeze([]) as readonly number[],
   seed: 1,
+  sweepFill: "line",
 });
 
 /** The controller's REST port, used when nothing else is known. */
@@ -44,7 +47,7 @@ export const DEFAULT_PORT = 16021;
 /** Documented ranges of the numeric settings (inclusive), shared with the UI's sliders. */
 export const SETTING_RANGES = Object.freeze({
   maxBrightness: Object.freeze({ min: 5, max: 100 }),
-  pinnedLevel: Object.freeze({ min: 10, max: 80 }),
+  pinnedBrightness: Object.freeze({ min: 5, max: 100 }),
 });
 
 /** Every order mode, in the order the UI offers them. */
@@ -58,6 +61,7 @@ export const AUTO_ORDERS: readonly AutoOrder[] = Object.freeze([
   "top-down",
 ]);
 
+const SWEEP_FILLS: readonly SweepFill[] = ["line", "panels"];
 const PINNED_STYLES: readonly PinnedStyle[] = ["glow", "pulse"];
 const IDLE_BEHAVIOURS: readonly IdleBehaviour[] = ["restore", "off"];
 const COLOR_MODES = ["effect", "hs", "ct"] as const;
@@ -108,13 +112,13 @@ function wrapDegrees(degrees: number): number {
 export function readSettings(raw: unknown): Settings {
   if (!isRecord(raw)) return DEFAULT_SETTINGS;
   const d = DEFAULT_SETTINGS;
-  const { maxBrightness, pinnedLevel } = SETTING_RANGES;
+  const { maxBrightness, pinnedBrightness } = SETTING_RANGES;
   const rotation = isFiniteNumber(raw.viewRotation) ? wrapDegrees(Math.round(raw.viewRotation / 30) * 30) : 0;
   return {
     enabled: readBoolean(raw.enabled, d.enabled),
     maxBrightness: readInt(raw.maxBrightness, maxBrightness.min, maxBrightness.max, d.maxBrightness),
     pinnedStyle: readOneOf(raw.pinnedStyle, PINNED_STYLES, d.pinnedStyle),
-    pinnedLevel: readInt(raw.pinnedLevel, pinnedLevel.min, pinnedLevel.max, d.pinnedLevel),
+    pinnedBrightness: readInt(raw.pinnedBrightness, pinnedBrightness.min, pinnedBrightness.max, d.pinnedBrightness),
     pinnedProgress: readBoolean(raw.pinnedProgress, d.pinnedProgress),
     track: readBoolean(raw.track, d.track),
     scheduleAlert: readBoolean(raw.scheduleAlert, d.scheduleAlert),
@@ -144,6 +148,7 @@ export function readOrder(raw: unknown): PanelOrder {
     auto: readOneOf(raw.auto, AUTO_ORDERS, DEFAULT_ORDER.auto),
     ids,
     seed: isFiniteNumber(raw.seed) ? Math.trunc(raw.seed) >>> 0 : DEFAULT_ORDER.seed,
+    sweepFill: readOneOf(raw.sweepFill, SWEEP_FILLS, DEFAULT_ORDER.sweepFill),
   };
 }
 

@@ -2,15 +2,16 @@ import { cn } from "@heroui/theme";
 import { ZoomIn, ZoomOut } from "lucide-react";
 import { AnimatePresence, animate, motion, useReducedMotion } from "motion/react";
 import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { PlacedLayout, Rgb } from "../../../../shared/types.ts";
+import type { FillSpan, PlacedLayout, Rgb } from "../../../../shared/types.ts";
 import { useMediaQuery } from "../../hooks/useMediaQuery.ts";
 import type { RenderStateRef } from "../../hooks/useRenderState.ts";
 import { withAlpha } from "../../lib/color.ts";
 import { EASE_IN_OUT, EASE_OUT } from "../../motion.ts";
 import { type NumbersLevel, StageBadges } from "./StageBadges.tsx";
 import { type PanelFlash, StageCanvas } from "./StageCanvas.tsx";
+import { Horizon } from "./Horizon.tsx";
 import { StageToast, type ToastMessage } from "./StageToast.tsx";
-import { layoutStage, type Stage, stageHeight, zoomFor } from "./stageLayout.ts";
+import { layoutStage, type Stage, steadyHeight, zoomFor } from "./stageLayout.ts";
 
 /** The stage's own surface: the theme's surface, kept dark in a light theme (`.wall-stage` in wall.css). */
 export const STAGE_BG = "var(--db-surface)";
@@ -22,11 +23,15 @@ const TURN = { duration: 0.6, ease: EASE_IN_OUT } as const;
 
 interface WallStageProps {
   readonly placed: PlacedLayout;
+  /** The wall at every view rotation: when given, the drawing keeps the tallest of their heights through a turn. */
+  readonly turns?: readonly PlacedLayout[];
   /** The saved view rotation: a change turns the drawing. */
   readonly rotation: number;
   readonly stateRef: RenderStateRef;
   /** The resolved order the lights follow. */
   readonly order: readonly number[];
+  /** Each panel's share of a goal when the order fills as a line (null one panel at a time). */
+  readonly spans?: readonly FillSpan[] | null;
   /** The order the numbers show (differs while a list row is being dragged). */
   readonly numberOrder: readonly number[];
   readonly drafting: boolean;
@@ -41,12 +46,21 @@ interface WallStageProps {
   readonly muted: boolean;
   readonly status: string | null;
   readonly label: string;
+  /**
+   * On the night sky: no surface, ring, colour wash or floor glow, so the stars show through, and the wall's light
+   * lies under the drawing as a horizon instead; the zoom button rises clear of what sits over the drawing's foot.
+   */
+  readonly sky?: boolean;
+  /** How strongly light is drawn, from the wall's brightness (StageCanvas). */
+  readonly level?: number;
   readonly toast: ToastMessage | null;
   /** The header above the drawing and the controls below it. */
   readonly header: ReactNode;
   readonly footer?: ReactNode;
   /** A tighter limit on the drawing's height than the frame's ~60% (the phone layout pins the stage). */
   readonly cap?: number;
+  /** Icon buttons that join the zoom button in one group on the drawing (`toolClass` styles them). */
+  readonly tools?: ReactNode;
   onToastDone(): void;
   onHover(id: number | null): void;
   onActivate(id: number): void;
@@ -82,7 +96,7 @@ export function WallStage(props: WallStageProps) {
     return () => observer.disconnect();
   }, []);
 
-  const height = width > 0 ? stageHeight(placed, width, cap) : 0;
+  const height = width > 0 ? steadyHeight(placed, props.turns, width, cap) : 0;
   const fitted = useMemo(() => (width > 0 ? layoutStage(placed, width, height) : null), [placed, width, height]);
   const zoom = fitted ? zoomFor(fitted) : 1;
   const z = zoomOn && zoom > 1 ? zoom : 1;
@@ -140,21 +154,53 @@ export function WallStage(props: WallStageProps) {
     };
   }, [rotation, stage, height, reduced]);
 
-  const wash = props.wash
+  // Offered only when the smallest panels are under a finger's width.
+  const zoomButton =
+    zoom > 1 ? (
+      <button
+        type="button"
+        aria-pressed={z > 1}
+        aria-label={z > 1 ? "Fit the whole wall" : "Zoom in: bigger panels to tap"}
+        title={z > 1 ? "Fit the whole wall" : "Zoom in: bigger panels to tap"}
+        onClick={() => {
+          auto.current.zoomed = false;
+          setZoomOn(z === 1);
+        }}
+        className={toolClass(z > 1)}
+      >
+        {z > 1 ? <ZoomOut className="h-4 w-4" /> : <ZoomIn className="h-4 w-4" />}
+      </button>
+    ) : null;
+
+  const wash = props.wash && !props.sky
     ? `radial-gradient(90% 70% at 50% 45%, ${withAlpha(props.wash, 0.09)}, transparent 70%)`
     : undefined;
 
   return (
     <div
-      className="wall-stage relative overflow-hidden rounded-3xl text-foreground ring-1 ring-default-100"
-      style={{ background: STAGE_BG }}
+      className={cn(
+        "wall-stage relative text-foreground",
+        props.sky ? "overflow-visible" : "overflow-hidden rounded-3xl ring-1 ring-default-100",
+      )}
+      style={{ background: props.sky ? undefined : STAGE_BG }}
     >
       {props.header}
-      <div ref={area} className="relative w-full" style={{ height: height || 280, backgroundImage: wash }}>
+      {/* Holding a number to drag it, or a panel on a touch screen, must never select the numbers or call up the
+          long-press menu. */}
+      <div
+        ref={area}
+        className="relative w-full select-none [-webkit-touch-callout:none]"
+        style={{ height: height || 280, backgroundImage: wash }}
+      >
+        {/* On the sky the wall's light lies under the drawing as a horizon (its floor glow steps aside). */}
+        {props.sky && <Horizon />}
         {stage && (
           <div
             ref={scroller}
-            className={cn("absolute inset-0", z > 1 ? "overflow-auto overscroll-contain" : "overflow-hidden")}
+            className={cn(
+              "absolute inset-0",
+              z > 1 ? "overflow-auto overscroll-contain" : "overflow-hidden",
+            )}
           >
             <div className="relative" style={{ width: stage.width, height: stage.height }}>
               <div ref={turn} className="absolute inset-0" style={{ transformOrigin: "0 0" }}>
@@ -162,6 +208,7 @@ export function WallStage(props: WallStageProps) {
                   stage={stage}
                   stateRef={props.stateRef}
                   order={props.order}
+                  spans={props.spans}
                   drafting={drafting}
                   muted={props.muted}
                   draft={props.draft}
@@ -170,6 +217,8 @@ export function WallStage(props: WallStageProps) {
                   flash={props.flash}
                   accent={props.accent}
                   label={props.label}
+                  floor={!props.sky}
+                  level={props.level}
                   onHover={props.onHover}
                   onActivate={props.onActivate}
                 />
@@ -190,26 +239,27 @@ export function WallStage(props: WallStageProps) {
           </div>
         )}
         <StageToast toast={props.toast} onDone={props.onToastDone} />
-        {zoom > 1 && (
-          <button
-            type="button"
-            aria-pressed={z > 1}
-            aria-label={z > 1 ? "Fit the whole wall" : "Zoom in: bigger panels to tap"}
-            title={z > 1 ? "Fit the whole wall" : "Zoom in: bigger panels to tap"}
-            onClick={() => {
-              auto.current.zoomed = false;
-              setZoomOn(z === 1);
-            }}
+        {/* Zoom alone floats on the drawing; with tools it joins them in the row under it. */}
+        {props.tools == null && zoomButton && (
+          <div
             className={cn(
-              "absolute right-3 bottom-3 z-10 grid h-9 w-9 place-items-center rounded-xl bg-background/60",
-              "text-default-600 ring-1 ring-white/10 backdrop-blur transition-[background-color,color,transform]",
-              "duration-150 ease-out hover:bg-black/75 hover:text-foreground active:scale-[0.9]",
+              "absolute right-3 z-10 rounded-full bg-background/70 p-1 ring-1 ring-white/10 backdrop-blur",
+              props.sky ? "bottom-12" : "bottom-3",
             )}
           >
-            {z > 1 ? <ZoomOut className="h-4 w-4" /> : <ZoomIn className="h-4 w-4" />}
-          </button>
+            {zoomButton}
+          </div>
         )}
       </div>
+      {/* The drawing's tools as one segmented group under it, right-aligned, zoom last. */}
+      {props.tools != null && (
+        <div className="flex justify-end px-3 pt-1 pb-3">
+          <div role="group" aria-label="Drawing" className="flex w-fit items-center gap-0.5 rounded-full bg-default-100 p-1">
+            {props.tools}
+            {zoomButton}
+          </div>
+        </div>
+      )}
       {/* Under the drawing, not over it: on a phone the sentence wraps and would cover the bottom row of panels. */}
       <AnimatePresence initial={false}>
         {props.status && (
@@ -230,6 +280,15 @@ export function WallStage(props: WallStageProps) {
       </AnimatePresence>
       {props.footer != null && <div className="border-white/5 border-t">{props.footer}</div>}
     </div>
+  );
+}
+
+/** One icon button in the drawing's tool group; `on` while it's pressed (zoomed in, numbers showing…). */
+export function toolClass(on: boolean): string {
+  return cn(
+    "grid h-9 w-9 place-items-center rounded-full transition-[background-color,color,transform] duration-150 ease-out",
+    "active:scale-[0.9]",
+    on ? "bg-white/15 text-foreground" : "text-default-600 hover:bg-white/10 hover:text-foreground",
   );
 }
 

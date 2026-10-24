@@ -133,3 +133,10 @@
 .sim-name {
   flex: none;
 }
+
+/* Under a top picker (variants that use the bottom of the screen). */
+.sim-panel[data-placement="top"] {
+  top: 68px;
+  bottom: auto;
+  right: 12px;
+}

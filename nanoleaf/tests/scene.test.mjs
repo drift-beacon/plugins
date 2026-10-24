@@ -11,7 +11,7 @@ const SETTINGS = Object.freeze({
   enabled: true,
   maxBrightness: 80,
   pinnedStyle: "pulse",
-  pinnedLevel: 35,
+  pinnedBrightness: 28,
   pinnedProgress: true,
   track: true,
   scheduleAlert: true,
@@ -135,13 +135,14 @@ test("pinned: the first non-archived pin of mine, at the pinned level and style"
     cssColor: "gold",
     rgb: [255, 215, 0],
     progress: { goal: { type: "count", count: 4 }, period: "day", current: 1, target: 4, fraction: 0.25 },
-    level: 0.35,
+    level: 1,
     style: "pulse",
     track: true,
   });
-  const glow = scene({ activities, sessions, settings: { ...SETTINGS, pinnedStyle: "glow", pinnedLevel: 80 } });
+  // A pin's level is 1 whatever its brightness: main dims it on the wall (`pinnedBrightness`), not the frames.
+  const glow = scene({ activities, sessions, settings: { ...SETTINGS, pinnedStyle: "glow", pinnedBrightness: 80 } });
   assert.equal(glow.style, "glow");
-  assert.equal(glow.level, 0.8);
+  assert.equal(glow.level, 1);
 });
 
 test("an archived activity's live session still glows (as core's live slot shows it); its pin is ignored", () => {

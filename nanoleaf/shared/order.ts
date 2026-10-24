@@ -3,7 +3,7 @@
  * the panels the wall has now. Everything is deterministic: the same panels (in any input order) give the same order.
  */
 import { adjacency } from "./geometry.ts";
-import type { AutoOrder, PanelOrder, PlacedPanel, Point } from "./types.ts";
+import type { AutoOrder, FillSpan, PanelOrder, PlacedPanel, Point } from "./types.ts";
 
 /** Centres closer than this (layout units) count as level or aligned: the device rounds centroids to integers. */
 const LEVEL = 1;
@@ -355,6 +355,44 @@ export function resolveOrder(order: PanelOrder, panels: readonly PlacedPanel[]):
   }
   if (out.length < present.size) for (const id of autoOrder(panels, "path")) if (!seen.has(id)) out.push(id);
   return out;
+}
+
+/** The way each sweep travels, in layout units (y points up). */
+const SWEEP_AXIS: Readonly<Record<Exclude<AutoOrder, "path">, Point>> = {
+  "left-right": [1, 0],
+  "right-left": [-1, 0],
+  "bottom-up": [0, 1],
+  "top-down": [0, -1],
+};
+
+/** Whether `order` fills as a line: a sweep (not the path) with `sweepFill: "line"`. */
+export function fillsAsLine(order: PanelOrder): boolean {
+  return order.mode === "auto" && order.auto !== "path" && order.sweepFill === "line";
+}
+
+/**
+ * How a line shares the goal out, parallel to `ids` (the resolved order): a straight edge travels along the sweep from
+ * the wall's leading edge to its trailing edge, and each panel fills while the edge crosses it (from its first corner
+ * to its last along the sweep). So the goal is how far the edge has got: panels side by side fill together, and a gap
+ * in the wall is a stretch where nothing changes. Null when the order fills one panel at a time.
+ */
+export function fillSpans(order: PanelOrder, panels: readonly PlacedPanel[], ids: readonly number[]): FillSpan[] | null {
+  if (!fillsAsLine(order) || order.auto === "path" || ids.length === 0) return null;
+  const [ax, ay] = SWEEP_AXIS[order.auto];
+  const byId = new Map(panels.map((panel) => [panel.id, panel]));
+  const extents = ids.map((id) => {
+    const panel = byId.get(id);
+    const along = (panel?.corners ?? []).map(([x, y]) => x * ax + y * ay);
+    return along.length > 0 ? [Math.min(...along), Math.max(...along)] : [0, 0];
+  });
+  const min = Math.min(...extents.map(([s]) => s as number));
+  const length = Math.max(...extents.map(([, e]) => e as number)) - min;
+  if (!(length > 0)) return null;
+  // A panel with no extent along the sweep still takes a sliver, so it fills (rather than divides by zero).
+  return extents.map(([s, e]) => ({
+    start: ((s as number) - min) / length,
+    span: Math.max(((e as number) - (s as number)) / length, 1e-6),
+  }));
 }
 
 /** Whether a saved order names exactly this layout's panels, each once (so a custom order needs no fixing up). */

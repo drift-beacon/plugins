@@ -80,9 +80,16 @@ const THEME = { key: "L", title: "The app switches between its light and dark th
 const toggleTheme = () => applyHostTheme(hostMode() === "dark" ? "light" : "dark");
 
 /** Stands in for Drift Beacon and the wall: every button is something the app or the controller would do. */
-export function SimPanel() {
+/**
+ * `collapsed`: start folded to its title, for phone-width harnesses where the open panel covers the layout. `top`:
+ * under a top picker, for variants that use the bottom of the screen.
+ */
+export function SimPanel({
+  collapsed: startCollapsed = false,
+  top = false,
+}: { collapsed?: boolean; top?: boolean } = {}) {
   const [readout, setReadout] = useState<SimReadout | null>(null);
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(startCollapsed);
 
   useEffect(() => onSimState(setReadout), []);
 
@@ -119,7 +126,12 @@ export function SimPanel() {
   );
 
   return (
-    <div className="sim-panel" aria-label="Nanoleaf simulator" data-collapsed={collapsed ? "" : undefined}>
+    <div
+      className="sim-panel"
+      aria-label="Nanoleaf simulator"
+      data-collapsed={collapsed ? "" : undefined}
+      data-placement={top ? "top" : undefined}
+    >
       <button className="sim-title" onClick={() => setCollapsed((c) => !c)} aria-expanded={!collapsed}>
         <span className="sim-name">Simulator</span>
         <span className="sim-readout">

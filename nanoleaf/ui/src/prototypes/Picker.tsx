@@ -12,7 +12,16 @@ function initialIndex(count: number) {
 }
 
 /** Harness chrome, as in the siblings: one variant at a time, full size, keyed so switching (or R) re-mounts it. */
-export function PickerHarness({ variants, replay = true }: { variants: Variant[]; replay?: boolean }) {
+/** `position: "top"`: the spec's one allowed move, for variants that use the bottom of the screen (a tab bar, a dock). */
+export function PickerHarness({
+  variants,
+  replay = true,
+  position = "bottom",
+}: {
+  variants: Variant[];
+  replay?: boolean;
+  position?: "bottom" | "top";
+}) {
   const [current, setCurrent] = useState(() => initialIndex(variants.length));
   const [mountKey, setMountKey] = useState(0);
   const [ready, setReady] = useState(false);
@@ -69,7 +78,12 @@ export function PickerHarness({ variants, replay = true }: { variants: Variant[]
   return (
     <>
       <Active key={`${current}-${mountKey}`} />
-      <nav className="proto-picker" aria-label="Prototype variants" data-ready={ready ? "" : undefined}>
+      <nav
+        className="proto-picker"
+        aria-label="Prototype variants"
+        data-ready={ready ? "" : undefined}
+        data-position={position === "top" ? "top" : undefined}
+      >
         <span ref={highlightRef} className="proto-picker-highlight" aria-hidden="true" />
         {variants.map((v, i) => (
           <button

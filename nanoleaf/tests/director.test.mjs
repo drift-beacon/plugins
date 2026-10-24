@@ -1,12 +1,22 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { deviceRgb, parseColor, toLedRgb } from "../shared/color.ts";
+import { deviceRgb, parseColor, toLedRgb, WARM_WHITE } from "../shared/color.ts";
 import { layoutFromPanelLayout, placeLayout } from "../shared/geometry.ts";
-import { resolveOrder } from "../shared/order.ts";
+import { fillSpans, resolveOrder } from "../shared/order.ts";
 import { parseAnimData } from "../shared/protocol.ts";
 import { readEffect, REVEAL_MS } from "../shared/effects.ts";
-import { ALERT_BEAT_MS, ALERT_MS, ALERT_OUT_MS, FADE_MS, STAGGER_MAX_MS } from "../shared/render.ts";
+import {
+  ALERT_BEAT_MS,
+  ALERT_MS,
+  ALERT_OUT_MS,
+  DRAFT_BRIGHTNESS,
+  DRAFT_MARKED,
+  DRAFT_WAITING,
+  DRAFT_YELLOW,
+  FADE_MS,
+  STAGGER_MAX_MS,
+} from "../shared/render.ts";
 import { OFF_SCENE } from "../shared/scene.ts";
 import { DEFAULT_ORDER, DEFAULT_SETTINGS } from "../shared/storage.ts";
 import { acquire, clearYielded, createOwner, holder, markYielded, release, yieldedMark } from "../main/src/claims.ts";
@@ -270,7 +280,7 @@ function setup(options = {}) {
     controllerId: device.id,
     events: options.events ?? true,
   };
-  const order = resolveOrder(DEFAULT_ORDER, placeLayout(layout).panels);
+  const order = resolveOrder(options.storage?.order ?? DEFAULT_ORDER, placeLayout(layout).panels);
   return {
     journal,
     clock,
@@ -361,6 +371,7 @@ const base = {
   enabled: true,
   scene: liveScene,
   previewActive: false,
+  draftActive: false,
   alertActive: false,
   yieldedKey: null,
   claimedElsewhere: false,
@@ -379,6 +390,9 @@ test("wantsControl needs enabled, connected with panels, something to show, no y
   assert.equal(wantsControl({ ...base, scene: OFF_SCENE, alertActive: true }), true);
   assert.equal(wantsControl({ ...base, scene: OFF_SCENE, alertActive: true, yieldedKey: "off" }), false);
   assert.equal(wantsControl({ ...base, yieldedKey: "live:s1" }), false);
+  assert.equal(wantsControl({ ...base, yieldedKey: "live:s1", previewActive: true }), false, "a preview doesn't");
+  assert.equal(wantsControl({ ...base, yieldedKey: "live:s1", previewActive: true, draftActive: true }), true);
+  assert.equal(wantsControl({ ...base, draftActive: true, previewActive: true, claimedElsewhere: true }), false);
   assert.equal(wantsControl({ ...base, yieldedKey: "live:old" }), true);
   assert.equal(wantsControl({ ...base, claimedElsewhere: true }), false);
 });
@@ -394,6 +408,10 @@ test("outputMode: disconnected, paused, busy, yielded, preview, live, pinned and
   assert.deepEqual(mode({ yieldedKey: "live:s1", yieldNote: "why" }), { mode: "yielded", detail: "why" });
   assert.deepEqual(mode({ yieldedKey: "off", scene: OFF_SCENE }), { mode: "idle", detail: null });
   assert.deepEqual(mode({ previewActive: true, note: "n" }), { mode: "preview", detail: "n" });
+  assert.deepEqual(mode({ yieldedKey: "live:s1", previewActive: true, draftActive: true }), {
+    mode: "preview",
+    detail: null,
+  });
   assert.deepEqual(mode({}), { mode: "live", detail: null });
   assert.deepEqual(mode({ scene: { ...liveScene, kind: "pinned", key: "pinned:a1" } }), {
     mode: "pinned",
@@ -822,6 +840,8 @@ test("goal progress fills the panels in order: 35% of the goal across the wall",
     activities: [activity("a1", PURPLE, goal)],
     sessions: [liveSession("s1", "a1", T0 - 21 * 60_000)],
     settings: { track: false },
+    // One panel at a time along the path (a sweep fills as a line: the test below).
+    storage: { order: { ...DEFAULT_ORDER, auto: "path" } },
   });
   await connect(env);
   await env.clock.advance(2000);
@@ -835,6 +855,38 @@ test("goal progress fills the panels in order: 35% of the goal across the wall",
     assert.ok(levels[k] >= expected - 0.02 && levels[k] <= expected + boost + 0.02, `panel ${k}: ${levels[k]}`);
   }
   assert.equal(env.director.output.fraction, Math.round(((21 * 60 + 2) / 3600) * 1000) / 1000);
+  await env.director.stop();
+});
+
+test("a sweep set to fill as a line drives the wall by distance: each panel as far as the edge has crossed it", async () => {
+  const goal = { goal: { type: "duration", seconds: 3600 }, period: "day" };
+  const order = { ...DEFAULT_ORDER, auto: "left-right", sweepFill: "line" };
+  const env = setup({
+    activities: [activity("a1", PURPLE, goal)],
+    sessions: [liveSession("s1", "a1", T0 - 21 * 60_000)],
+    settings: { track: false },
+    storage: { order },
+  });
+  await connect(env);
+  await env.clock.advance(2000);
+  const panels = placeLayout(env.storage.get("layout")).panels;
+  const ids = resolveOrder(order, panels);
+  const spans = fillSpans(order, panels, ids);
+  assert.deepEqual(env.director.order, ids);
+  assert.ok(
+    spans.some((s, k) => Math.abs(s.start - k / ids.length) > 0.05),
+    "a line differs from one panel at a time here",
+  );
+  const f = (21 * 60 + 2) / 3600;
+  const led = toLedRgb(parseColor(PURPLE));
+  const light = new Map(lastFrame(env).lights);
+  ids.forEach((id, k) => {
+    const { start, span } = spans[k];
+    const expected = Math.min(1, Math.max(0, (f - start) / span));
+    const boost = f >= start && f < start + span ? 0.07 : 0;
+    const level = levelOf(light.get(id), led);
+    assert.ok(level >= expected - 0.02 && level <= expected + boost + 0.02, `panel ${id}: ${level} vs ${expected}`);
+  });
   await env.director.stop();
 });
 
@@ -883,7 +935,7 @@ test("a takeover keeps the tracked render state: the goal-met wave plays once, n
 /* ---- Release ---- */
 
 test("release waits out the 1.5 s grace, then hands back (restore)", async () => {
-  const env = setup({ sessions: [liveSession("s1", "a1", T0)] });
+  const env = setup({ sessions: [liveSession("s1", "a1", T0)], settings: { idle: "restore" } });
   await connect(env);
   await env.clock.advance(1000);
   const before = env.device.calls.length;
@@ -914,7 +966,8 @@ test("a session ending and a pin within the grace keep control without a hand-ba
   await env.clock.advance(4000);
   assert.equal(env.director.inControl, true);
   assert.equal(env.director.scene.key, "pinned:a2");
-  assert.deepEqual(env.device.calls.slice(before), []);
+  // Only the pin's own brightness: no hand-back, and the stream goes on.
+  assert.deepEqual(env.device.calls.slice(before), [["setState", { brightness: { value: 28, duration: 0 } }]]);
   assert.equal(env.streams.length, 1);
   await env.director.stop();
 });
@@ -1387,6 +1440,51 @@ test("a preview takes the wall for its lease, then the grace, then hands back", 
   assert.equal(env.device.state.effect, "Northern Lights");
 });
 
+test("tap to order holds the wall over a live session: full brightness, its own colours, no alert, then the scene", async () => {
+  const env = setup({ sessions: [liveSession("s1", "a1", T0)], settings: { maxBrightness: 40 } });
+  await connect(env);
+  await env.clock.advance(1000);
+  assert.equal(env.device.state.brightness, 40);
+  const [first, second] = env.order;
+  assert.deepEqual(env.director.preview({ mode: "draft", panelIds: [first], ttlMs: 10_000 }), { shown: true });
+  await env.clock.advance(500);
+  assert.equal(env.director.output.mode, "preview");
+  assert.equal(env.device.state.brightness, DRAFT_BRIGHTNESS, "its levels are its own, whatever the setting");
+  const panel = (id) => new Map(lastFrame(env).lights).get(id);
+  const waiting = deviceRgb({ rgb: WARM_WHITE, level: DRAFT_WAITING });
+  assert.deepEqual(panel(first), deviceRgb({ rgb: DRAFT_YELLOW, level: DRAFT_MARKED }), "numbered: yellow");
+  assert.deepEqual(panel(second), waiting, "waiting: faint warm white");
+  // A schedule firing meanwhile is dropped, not played over the taps or after them.
+  assert.deepEqual(env.director.alert("a2"), { shown: false });
+  await env.clock.advance(ALERT_BEAT_MS / 2);
+  assert.deepEqual(panel(second), waiting);
+  // Ended: the live session again, at its own brightness.
+  env.director.preview({ mode: "none" });
+  await env.clock.advance(500);
+  assert.equal(env.director.output.mode, "live");
+  assert.equal(env.device.state.brightness, 40);
+  await env.director.stop();
+});
+
+test("tap to order takes back a yielded wall, which ends the yield as Resume does", async () => {
+  const env = setup({ sessions: [liveSession("s1", "a1", T0)] });
+  await connect(env);
+  await env.clock.advance(3000);
+  env.director.onDeviceEvent({ effect: "Flames" });
+  assert.equal(env.director.output.mode, "yielded");
+  // An ordinary preview leaves someone else's wall alone; tap to order asks for it.
+  assert.deepEqual(env.director.preview({ mode: "fill", fraction: 0.5 }), { shown: false });
+  assert.deepEqual(env.director.preview({ mode: "draft", panelIds: [], ttlMs: 10_000 }), { shown: true });
+  await env.clock.advance(100);
+  assert.equal(env.director.inControl, true);
+  assert.equal(env.director.output.mode, "preview");
+  env.director.preview({ mode: "none" });
+  await env.clock.advance(2000);
+  assert.equal(env.director.inControl, true);
+  assert.equal(env.director.output.mode, "live");
+  await env.director.stop();
+});
+
 test("preview none ends the lease at once; a preview never shows while paused", async () => {
   const env = setup({ settings: { enabled: false } });
   await connect(env);
@@ -1560,6 +1658,34 @@ test("brightness overrides are throttled to one write per 150 ms and the last va
   await env.director.stop();
 });
 
+test("a pin drives the wall at its own brightness; a preview over it, and a session, at Session brightness", async () => {
+  const env = setup({
+    activities: [activity("a1", PURPLE, { pinnedBy: [USER] }), activity("a2", "#10b981")],
+    settings: { maxBrightness: 80, pinnedBrightness: 20 },
+  });
+  await connect(env);
+  await env.clock.advance(1000);
+  assert.equal(env.director.scene.kind, "pinned");
+  assert.equal(env.device.state.brightness, 20);
+  // Seen however dim the pin is.
+  assert.deepEqual(env.director.preview({ mode: "fill", fraction: 0.5, ttlMs: 10_000 }), { shown: true });
+  await env.clock.advance(500);
+  assert.equal(env.device.state.brightness, 80);
+  env.director.preview({ mode: "none" });
+  await env.clock.advance(500);
+  assert.equal(env.device.state.brightness, 20, "back to the pin's own once the preview ends");
+  // A new pin brightness lands on the next tick, as a slider moves.
+  env.storage.map.set("settings", { ...DEFAULT_SETTINGS, maxBrightness: 80, pinnedBrightness: 45 });
+  env.director.update();
+  await env.clock.advance(200);
+  assert.equal(env.device.state.brightness, 45);
+  startLive(env, "a2");
+  await env.clock.advance(500);
+  assert.equal(env.director.scene.kind, "live");
+  assert.equal(env.device.state.brightness, 80);
+  await env.director.stop();
+});
+
 test("a failed brightness write is tried again after a backoff until it lands", async () => {
   const env = setup({ sessions: [liveSession("s1", "a1", T0)] });
   await connect(env);
@@ -1642,7 +1768,7 @@ test("no layout panels: idle with a note, and nothing is taken", async () => {
 /* ---- Stop ---- */
 
 test("stop hands back when in control and frees the claim", async () => {
-  const env = setup({ sessions: [liveSession("s1", "a1", T0)] });
+  const env = setup({ sessions: [liveSession("s1", "a1", T0)], settings: { idle: "restore" } });
   await connect(env);
   const before = env.device.calls.length;
   await env.director.stop();

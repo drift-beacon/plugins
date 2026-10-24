@@ -1,13 +1,18 @@
-import type { AutoOrder, OrderMode, PanelOrder } from "../../../../shared/types.ts";
+import type { AutoOrder, OrderMode, PanelOrder, SweepFill } from "../../../../shared/types.ts";
 
 /*
  * How the editor's choices change the saved order. `ids` holds the hand-made (custom) order and survives a switch to
  * Auto or Random, which ignore it (order.ts resolveOrder), so choosing Custom again brings the hand-made order back.
  */
 
-/** A hand-made order of `ids`, keeping the auto kind and seed for when the user switches back. */
+/** A hand-made order of `ids`, keeping the auto kind, seed and sweep fill for when the user switches back. */
 export function customOrder(saved: PanelOrder, ids: readonly number[]): PanelOrder {
-  return { mode: "custom", auto: saved.auto, seed: saved.seed, ids: [...ids] };
+  return { ...saved, mode: "custom", ids: [...ids] };
+}
+
+/** The same order, its sweep filling one panel at a time or as a line. */
+export function orderForSweepFill(saved: PanelOrder, sweepFill: SweepFill): PanelOrder {
+  return { ...saved, sweepFill };
 }
 
 /**

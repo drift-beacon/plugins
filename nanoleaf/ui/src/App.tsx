@@ -1,29 +1,30 @@
 import { cn } from "@heroui/theme";
-import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
 import { type ReactNode, useEffect, useState } from "react";
 import "./components/ui.css";
 import { Board } from "./components/Board.tsx";
 import { ControllerCard } from "./components/ControllerCard.tsx";
 import { Notices } from "./components/Notice.tsx";
 import { NowCard } from "./components/NowCard.tsx";
-import { PhoneSections } from "./components/PhoneSections.tsx";
+import { PhoneTabs } from "./components/phone/PhoneTabs.tsx";
 import { SettingsPanel } from "./components/SettingsPanel.tsx";
 import { type SetupIntent, SetupFlow } from "./components/setup/SetupFlow.tsx";
 import { WallSection } from "./components/wall/WallSection.tsx";
 import { useMediaQuery } from "./hooks/useMediaQuery.ts";
+import { useSwapMotion } from "./hooks/useSwapMotion.ts";
 import { useModel } from "./model.ts";
-import { EASE_OUT } from "./motion.ts";
 
-/** The drawing takes at most this share of a phone's frame, so the sections under it keep most of it. */
-const PHONE_CAP = 0.3;
-/** The drawing's height limit on the board, px: the wall card then matches the fill card beside it. */
+/** The drawing takes at most this share of a phone's frame on the Order tab, the goal preview and compass under it. */
+const PHONE_CAP = 0.36;
+/** The drawing's height limit on the board, px: the wall card then ends near the side column beside it. */
 const BOARD_CAP = 300;
 
 /**
- * The layout, once a controller is paired and its wall is known. Narrow (the iframe under 768 px): the wall pinned
- * on top and everything else a list of sections under it (PhoneSections). Wide: the Board, the wall and how it fills
- * on top and one card per situation under them. Until then, and while pairing again, the setup takes the wall's
- * place with Now and Settings beside it (under it when narrow); notices sit above everything.
+ * The layout, once a controller is paired and its wall is known. Narrow (the iframe under 768 px): three tabs over a
+ * bar at the bottom (PhoneTabs). Wide: the Board, the wall and how it fills on top and one card per situation under
+ * them. On a phone, first run is the Wall tab, the other tabs disabled until a wall is paired. Otherwise, until then
+ * and while pairing again, the setup takes the wall's place with Settings beside it (under it when narrow), and Now
+ * too when pairing again; notices sit above everything.
  */
 function useViewportHeight(): number {
   const [height, setHeight] = useState(() => window.innerHeight);
@@ -37,7 +38,6 @@ function useViewportHeight(): number {
 
 export function App() {
   const model = useModel();
-  const reduced = useReducedMotion();
   const [setup, setSetup] = useState<SetupIntent | null>(() => (model.controller ? null : { mode: "first" }));
   const phone = useMediaQuery("(max-width: 767px)");
   const height = useViewportHeight();
@@ -54,14 +54,7 @@ export function App() {
     model: model.controller?.model ?? null,
   });
 
-  const swap = {
-    initial: reduced ? { opacity: 0 } : { opacity: 0, filter: "blur(4px)", transform: "scale(0.99)" },
-    animate: { opacity: 1, filter: "blur(0px)", transform: "scale(1)" },
-    exit: reduced
-      ? { opacity: 0, transition: { duration: 0.15 } }
-      : { opacity: 0, filter: "blur(4px)", transition: { duration: 0.15, ease: EASE_OUT } },
-    transition: { duration: 0.3, ease: EASE_OUT },
-  };
+  const swap = useSwapMotion();
 
   const stage: ReactNode = (
     <AnimatePresence mode="wait" initial={false}>
@@ -89,17 +82,26 @@ export function App() {
     />
   );
 
-  // Paired, with a wall to draw. Two trees: crossing 768 px remounts the wall, which a phone never does.
+  // A phone has its tabs from first run on: the setup is the Wall tab until a wall is paired, the other tabs wait.
+  const firstRun = setup?.mode === "first";
+  if (phone && (firstRun || (!setup && model.layout))) {
+    return (
+      <PhoneTabs
+        cap={Math.round(height * PHONE_CAP)}
+        notices={notices}
+        setup={firstRun ? <SetupFlow intent={setup} onDone={() => setSetup(null)} /> : null}
+      />
+    );
+  }
+
+  // Wide, paired, with a wall to draw. Phone and board are two trees: crossing 768 px remounts the wall (or a first
+  // run), which a phone never does.
   if (!setup && model.layout) {
-    return phone ? (
-      <div className="w-full px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+    return (
+      // The night sky reaches past the wall's column: clipped at the frame, so the page never scrolls sideways.
+      <div className="mx-auto w-full max-w-7xl overflow-x-clip p-px">
         {notices}
-        <WallSection cap={Math.round(height * PHONE_CAP)} arrange={(parts) => <PhoneSections parts={parts} />} />
-      </div>
-    ) : (
-      <div className="mx-auto w-full max-w-7xl p-px">
-        {notices}
-        <WallSection cap={BOARD_CAP} arrange={(parts) => <Board parts={parts} />} />
+        <WallSection cap={BOARD_CAP} sky arrange={(parts) => <Board parts={parts} />} />
       </div>
     );
   }
@@ -108,7 +110,7 @@ export function App() {
     // Padded: the cards' rings draw outside their boxes, and the frame's edge would clip them.
     <div className="mx-auto w-full max-w-7xl p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] md:p-px">
       {notices}
-      {/* One tree for both widths (CSS decides), so crossing 768 px never remounts the wall or a setup in progress. */}
+      {/* One tree for both widths (CSS decides), so crossing 768 px never remounts pairing again in progress. */}
       <div
         className={cn(
           "flex flex-col gap-3",
@@ -120,9 +122,12 @@ export function App() {
           {stage}
         </div>
         <div className="contents md:block md:min-w-0 md:space-y-4">
-          <div className="order-1 md:order-none">
-            <NowCard />
-          </div>
+          {/* First run is about the setup: there's no wall yet for Now to speak for. */}
+          {setup?.mode !== "first" && (
+            <div className="order-1 md:order-none">
+              <NowCard />
+            </div>
+          )}
           <div className="order-3 md:order-none">
             <SettingsPanel />
           </div>

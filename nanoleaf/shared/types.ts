@@ -127,6 +127,17 @@ export interface ControllerConfig {
 export type OrderMode = "auto" | "custom" | "random";
 /** Automatic orders: `path` walks neighbouring panels; the others sweep across the (rotated) wall. */
 export type AutoOrder = "path" | "left-right" | "right-left" | "bottom-up" | "top-down";
+/** How a sweep fills: a straight edge crossing the wall (`line`), or one panel at a time along it (`panels`). */
+export type SweepFill = "line" | "panels";
+
+/**
+ * A panel's share of the goal: it fills from `start` to `start + span`, as fractions of the goal (0–1). One panel at a
+ * time, position k of n is k/n to (k+1)/n; a line gives each panel the stretch of the wall it covers (order.ts).
+ */
+export interface FillSpan {
+  readonly start: number;
+  readonly span: number;
+}
 
 export interface PanelOrder {
   readonly mode: OrderMode;
@@ -139,6 +150,8 @@ export interface PanelOrder {
   readonly ids: readonly number[];
   /** Used when `mode` is `random`: the same seed gives the same shuffle for the same panels. */
   readonly seed: number;
+  /** Used when `auto` is a sweep (not `path`), and kept through the others for the next sweep. */
+  readonly sweepFill: SweepFill;
 }
 
 export type PinnedStyle = "glow" | "pulse";
@@ -147,12 +160,15 @@ export type IdleBehaviour = "restore" | "off";
 export interface Settings {
   /** Drive the panels at all. Off hands the wall back (as `idle` says) and keeps it. */
   readonly enabled: boolean;
-  /** 5–100: the wall's brightness while the plugin drives it. */
+  /**
+   * 5–100: the wall's brightness while the plugin drives it (a live session, a preview, another plugin's effect),
+   * except while a pin shows: that's `pinnedBrightness`. The interface calls it Session brightness.
+   */
   readonly maxBrightness: number;
   /** How a pinned activity shows when nothing is live. */
   readonly pinnedStyle: PinnedStyle;
-  /** 10–80: a pinned activity's brightness as a percentage of the maximum (the peak, when pulsing). */
-  readonly pinnedLevel: number;
+  /** 5–100: the wall's brightness while a pinned activity shows (the peak, when pulsing), whatever `maxBrightness` is. */
+  readonly pinnedBrightness: number;
   /** Show the pinned activity's goal progress, not just its colour. */
   readonly pinnedProgress: boolean;
   /** Light unfilled panels faintly, so the whole goal is visible. */
@@ -294,7 +310,7 @@ export interface ActivityScene {
   readonly rgb: Rgb | null;
   /** Null when there is no goal, or the scene doesn't show one (pinned with `pinnedProgress` off). */
   readonly progress: GoalProgress | null;
-  /** 0–1: the scene's peak level before the wall's brightness (live 1; pinned `pinnedLevel / 100`). */
+  /** 0–1: the scene's peak level before the wall's brightness (1 when anything shows: a pin is dimmed by its brightness). */
   readonly level: number;
   /** `glow` for live scenes; the setting for pinned ones. */
   readonly style: PinnedStyle;
@@ -305,7 +321,9 @@ export interface ActivityScene {
 export type Preview =
   | { readonly mode: "identify"; readonly panelIds: readonly number[]; readonly rgb: Rgb | null }
   | { readonly mode: "fill"; readonly fraction: number; readonly rgb: Rgb | null }
-  | { readonly mode: "order"; readonly rgb: Rgb | null };
+  | { readonly mode: "order"; readonly rgb: Rgb | null }
+  /** Tap to order holds the wall: `panelIds` are numbered so far, the rest wait (render.ts `DRAFT_*`). */
+  | { readonly mode: "draft"; readonly panelIds: readonly number[]; readonly rgb: null };
 
 /** One-off flourishes the renderer plays on top of a scene. */
 export type Moment =

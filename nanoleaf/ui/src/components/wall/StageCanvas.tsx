@@ -1,7 +1,7 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { type KeyboardEvent, memo, useCallback, useId, useMemo, useRef } from "react";
 import { cssRgb, WARM_WHITE } from "../../../../shared/color.ts";
-import type { Rgb } from "../../../../shared/types.ts";
+import type { FillSpan, Rgb } from "../../../../shared/types.ts";
 import { type FrameWriter, useLights } from "../../hooks/useLights.ts";
 import type { RenderStateRef } from "../../hooks/useRenderState.ts";
 import { floorGlow, panelOpacity } from "../../lib/light.ts";
@@ -28,6 +28,8 @@ interface StageCanvasProps {
   readonly stateRef: RenderStateRef;
   /** The resolved fill order the lights follow. */
   readonly order: readonly number[];
+  /** Each panel's share of a goal when the order fills as a line (null one panel at a time). */
+  readonly spans?: readonly FillSpan[] | null;
   /** Tap to order: panels become buttons, the light dims and the draft shows. */
   readonly drafting: boolean;
   /** The wall isn't showing this (offline, paused, someone else driving…): the light is drawn faded and greyed. */
@@ -42,6 +44,10 @@ interface StageCanvasProps {
   readonly accent: Rgb;
   /** What the drawing says to a screen reader in view mode. */
   readonly label: string;
+  /** Light pooling on the floor under the wall; off where the page draws its own (the board's horizon). */
+  readonly floor?: boolean;
+  /** How strongly light is drawn, from the wall's brightness (lib/brightness.ts `drawnLevel`); 1 by default. */
+  readonly level?: number;
   /** Mouse hover (and keyboard focus while drafting); null when it leaves. */
   onHover(id: number | null): void;
   /** Click, tap, Enter or Space on a panel. */
@@ -81,7 +87,9 @@ export function StageCanvas(props: StageCanvasProps) {
   }, []);
 
   // A new stage is a new drawing: the writer's identity changes, so the loop redraws it at once. Opacity comes from
-  // the shared `lightOpacity` (lib/light.ts), so the drawing is as bright as the wall, not as the raw level.
+  // the shared `lightOpacity` (lib/light.ts), so the drawing is as bright as the wall, not as the raw level, scaled
+  // by `level` for the wall's brightness.
+  const level = props.level ?? 1;
   const panelIds = useMemo(() => stage.panels.map((p) => p.id), [stage]);
   const onFrame = useCallback<FrameWriter>(
     (lights) => {
@@ -89,7 +97,7 @@ export function StageCanvas(props: StageCanvasProps) {
         const node = nodes.current.get(panel.id);
         if (!node) continue;
         const light = lights.get(panel.id);
-        const opacity = panelOpacity(light);
+        const opacity = Math.round(panelOpacity(light) * level * 1000) / 1000;
         const fill = cssRgb(light?.rgb ?? WARM_WHITE);
         if (fill !== node.fill) {
           node.fill = fill;
@@ -108,7 +116,7 @@ export function StageCanvas(props: StageCanvasProps) {
       if (!f.el) return;
       const glow = floorGlow(lights, panelIds);
       const fill = glow.rgb ? cssRgb(glow.rgb) : f.fill || cssRgb(WARM_WHITE);
-      const opacity = glow.opacity;
+      const opacity = Math.round(glow.opacity * level * 1000) / 1000;
       if (fill !== f.fill) {
         f.fill = fill;
         f.el.setAttribute("fill", fill);
@@ -118,9 +126,9 @@ export function StageCanvas(props: StageCanvasProps) {
         f.el.setAttribute("opacity", String(opacity));
       }
     },
-    [stage, panelIds],
+    [stage, panelIds, level],
   );
-  useLights(stateRef, order, onFrame);
+  useLights(stateRef, order, onFrame, props.spans ?? null);
 
   const assigned = new Set(draft);
   const accentCss = cssRgb(accent);
@@ -158,6 +166,7 @@ export function StageCanvas(props: StageCanvasProps) {
       </defs>
 
       <LightLayers
+        floor={props.floor ?? true}
         stage={stage}
         ids={ids}
         lit={drafting ? DRAFT_LIGHT : muted ? MUTED_LIGHT : 1}
@@ -281,26 +290,36 @@ interface LightLayersProps {
   readonly lit: number;
   register(id: number, kind: "light" | "bloom" | "sheen", el: Element | null): void;
   registerFloor(el: SVGEllipseElement | null): void;
+  readonly floor: boolean;
 }
 
 /**
  * The static drawing and the light nodes. Memoised on the stage, so the once-a-second re-render of the section never
  * touches the elements the light loop owns.
  */
-const LightLayers = memo(function LightLayers({ stage, ids, lit: amount, register, registerFloor }: LightLayersProps) {
+const LightLayers = memo(function LightLayers({
+  stage,
+  ids,
+  lit: amount,
+  register,
+  registerFloor,
+  floor,
+}: LightLayersProps) {
   const lit = { opacity: amount, transition: "opacity 250ms cubic-bezier(0.23, 1, 0.32, 1)" };
   return (
     <>
       <g style={lit} aria-hidden>
-        <ellipse
-          ref={registerFloor}
-          cx={stage.floor.cx}
-          cy={stage.floor.cy}
-          rx={stage.floor.rx}
-          ry={stage.floor.ry}
-          opacity={0}
-          filter={`url(#${ids.floor})`}
-        />
+        {floor && (
+          <ellipse
+            ref={registerFloor}
+            cx={stage.floor.cx}
+            cy={stage.floor.cy}
+            rx={stage.floor.rx}
+            ry={stage.floor.ry}
+            opacity={0}
+            filter={`url(#${ids.floor})`}
+          />
+        )}
       </g>
       <g filter={`url(#${ids.bloom})`} style={{ ...lit, opacity: lit.opacity * 0.9 }} aria-hidden>
         {stage.panels.map((p) => (

@@ -16,6 +16,8 @@ export interface ControlInput {
   readonly scene: Scene;
   /** An interface preview's lease is running. */
   readonly previewActive: boolean;
+  /** That preview is tap to order holding the wall: it takes the wall even from a yield. */
+  readonly draftActive: boolean;
   /** A schedule alert is playing, or waiting for the wall to be taken. */
   readonly alertActive: boolean;
   /** The scene key the Director yielded on, if it did. */
@@ -50,7 +52,7 @@ function isYielded(input: ControlInput): boolean {
 
 /**
  * Whether the Director wants to drive the wall: enabled, connected with panels, something to show, not yielded for
- * this scene, and the claim free (or its own).
+ * this scene (unless tap to order asks for the wall), and the claim free (or its own).
  */
 export function wantsControl(input: ControlInput): boolean {
   return (
@@ -58,7 +60,7 @@ export function wantsControl(input: ControlInput): boolean {
     input.linked &&
     input.panels > 0 &&
     hasSomethingToShow(input) &&
-    !isYielded(input) &&
+    (!isYielded(input) || input.draftActive) &&
     !input.claimedElsewhere
   );
 }
@@ -69,7 +71,9 @@ export function outputMode(input: ControlInput): { readonly mode: OutputMode; re
   if (!input.enabled) return { mode: "paused", detail: null };
   if (input.panels === 0) return { mode: "idle", detail: NO_PANELS_DETAIL };
   const active = hasSomethingToShow(input);
-  if (active && isYielded(input)) return { mode: "yielded", detail: input.yieldNote ?? YIELDED_DETAIL };
+  if (active && isYielded(input) && !input.draftActive) {
+    return { mode: "yielded", detail: input.yieldNote ?? YIELDED_DETAIL };
+  }
   if (active && input.claimedElsewhere && !input.inControl) return { mode: "busy", detail: BUSY_DETAIL };
   if (input.previewActive) return { mode: "preview", detail: input.note };
   const kind = input.scene.kind;

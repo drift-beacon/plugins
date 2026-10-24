@@ -152,6 +152,44 @@
             "released"
           ]
         }
+      },
+      "setSessionBrightness": {
+        "title": "Set session brightness",
+        "description": "How bright the wall is while it shows a live session, a preview or another plugin's effect",
+        "mode": "latest",
+        "input": {
+          "type": "object",
+          "properties": {
+            "brightness": {
+              "type": "integer",
+              "minimum": 5,
+              "maximum": 100,
+              "description": "Percent"
+            }
+          },
+          "required": [
+            "brightness"
+          ]
+        }
+      },
+      "setPinnedBrightness": {
+        "title": "Set pinned brightness",
+        "description": "How bright the wall is while it shows a pinned activity",
+        "mode": "latest",
+        "input": {
+          "type": "object",
+          "properties": {
+            "brightness": {
+              "type": "integer",
+              "minimum": 5,
+              "maximum": 100,
+              "description": "Percent"
+            }
+          },
+          "required": [
+            "brightness"
+          ]
+        }
       }
     },
     "events": {
@@ -402,6 +440,61 @@
             "expiresAt"
           ]
         }
+      },
+      "brightness": {
+        "title": "Brightness",
+        "description": "The saved brightness settings, in percent",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "session": {
+              "type": "integer",
+              "minimum": 5,
+              "maximum": 100,
+              "description": "While a live session, a preview or another plugin's effect shows"
+            },
+            "pinned": {
+              "type": "integer",
+              "minimum": 5,
+              "maximum": 100,
+              "description": "While a pinned activity shows"
+            }
+          },
+          "required": [
+            "session",
+            "pinned"
+          ]
+        }
+      }
+    },
+    "controls": {
+      "sessionBrightness": {
+        "kind": "range",
+        "title": "Session brightness",
+        "value": {
+          "state": "brightness",
+          "path": "session"
+        },
+        "set": {
+          "command": "setSessionBrightness",
+          "field": "brightness"
+        },
+        "step": 5,
+        "unit": "%"
+      },
+      "pinnedBrightness": {
+        "kind": "range",
+        "title": "Pinned brightness",
+        "value": {
+          "state": "brightness",
+          "path": "pinned"
+        },
+        "set": {
+          "command": "setPinnedBrightness",
+          "field": "brightness"
+        },
+        "step": 5,
+        "unit": "%"
       }
     }
   }

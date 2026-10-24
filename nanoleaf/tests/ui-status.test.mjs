@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { OFF_SCENE } from "../shared/scene.ts";
 import { DEFAULT_SETTINGS } from "../shared/storage.ts";
-import { brightnessFeedback, onWall, sentence, wallStatus } from "../ui/src/components/status.ts";
+import { canPreviewBrightness, onWall, sentence, wallStatus } from "../ui/src/components/status.ts";
 
 const LIVE = {
   kind: "live",
@@ -15,7 +15,7 @@ const LIVE = {
   style: "glow",
   track: true,
 };
-const PINNED = { ...LIVE, kind: "pinned", key: "pinned:guitar", activityId: "guitar", level: 0.35, style: "pulse" };
+const PINNED = { ...LIVE, kind: "pinned", key: "pinned:guitar", activityId: "guitar", level: 1, style: "pulse" };
 
 const OUTPUT = { mode: "live", activityId: "deep-work", fraction: null, inControl: true, detail: null, since: "" };
 const LAYOUT = {
@@ -86,18 +86,20 @@ test("status: the Now card claims the wall only while main is in control", () =>
   });
 });
 
-test("status: Max brightness adjusts what shows, previews when nothing does, and says when it can't", () => {
-  assert.equal(brightnessFeedback(model(), LIVE), "adjust");
+test("status: a brightness slider previews on the wall whatever shows, unless main can't drive it", () => {
+  // Live, pinned or nothing on: the same preview.
+  assert.equal(canPreviewBrightness(model()), true);
+  assert.equal(canPreviewBrightness(model({ output: { ...OUTPUT, mode: "pinned", activityId: "guitar" } })), true);
   const idle = { ...OUTPUT, mode: "idle", activityId: null, inControl: false };
-  assert.equal(brightnessFeedback(model({ output: idle }), OFF_SCENE), "preview");
-  // The preview the slider starts puts main in control; the hint doesn't flip mid-drag.
-  assert.equal(brightnessFeedback(model({ output: { ...OUTPUT, mode: "preview" } }), OFF_SCENE), "preview");
-  assert.equal(brightnessFeedback(model({ output: { ...OUTPUT, mode: "yielded", inControl: false } }), LIVE), "none");
-  assert.equal(brightnessFeedback(model({ output: { ...OUTPUT, mode: "busy", inControl: false } }), LIVE), "none");
-  assert.equal(brightnessFeedback(model({ mainStatus: "unavailable", output: null }), LIVE), "none");
-  assert.equal(brightnessFeedback(model({ connection: { status: "unreachable" } }), LIVE), "none");
-  assert.equal(brightnessFeedback(model({ settings: { ...DEFAULT_SETTINGS, enabled: false } }), OFF_SCENE), "none");
-  assert.equal(brightnessFeedback(model({ layout: null, output: idle }), OFF_SCENE), "none");
+  assert.equal(canPreviewBrightness(model({ output: idle })), true);
+  // The preview the slider starts puts main in control; it doesn't flip mid-drag.
+  assert.equal(canPreviewBrightness(model({ output: { ...OUTPUT, mode: "preview" } })), true);
+  assert.equal(canPreviewBrightness(model({ output: { ...OUTPUT, mode: "yielded", inControl: false } })), false);
+  assert.equal(canPreviewBrightness(model({ output: { ...OUTPUT, mode: "busy", inControl: false } })), false);
+  assert.equal(canPreviewBrightness(model({ mainStatus: "unavailable", output: null })), false);
+  assert.equal(canPreviewBrightness(model({ connection: { status: "unreachable" } })), false);
+  assert.equal(canPreviewBrightness(model({ settings: { ...DEFAULT_SETTINGS, enabled: false } })), false);
+  assert.equal(canPreviewBrightness(model({ layout: null, output: idle })), false);
 });
 
 test("status: platform reasons become sentences", () => {

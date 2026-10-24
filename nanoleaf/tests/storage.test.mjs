@@ -27,18 +27,18 @@ test("defaults are the documented ones", () => {
     enabled: true,
     maxBrightness: 80,
     pinnedStyle: "pulse",
-    pinnedLevel: 35,
-    pinnedProgress: true,
+    pinnedBrightness: 28,
+    pinnedProgress: false,
     track: true,
     scheduleAlert: true,
     allowControl: true,
-    idle: "restore",
+    idle: "off",
     viewRotation: 0,
   });
-  assert.deepEqual(DEFAULT_ORDER, { mode: "auto", auto: "path", ids: [], seed: 1 });
+  assert.deepEqual(DEFAULT_ORDER, { mode: "auto", auto: "bottom-up", ids: [], seed: 1, sweepFill: "line" });
   assert.ok(Object.isFrozen(DEFAULT_SETTINGS));
   assert.ok(Object.isFrozen(DEFAULT_ORDER) && Object.isFrozen(DEFAULT_ORDER.ids));
-  assert.deepEqual(SETTING_RANGES, { maxBrightness: { min: 5, max: 100 }, pinnedLevel: { min: 10, max: 80 } });
+  assert.deepEqual(SETTING_RANGES, { maxBrightness: { min: 5, max: 100 }, pinnedBrightness: { min: 5, max: 100 } });
   assert.deepEqual([...ORDER_MODES].sort(), ["auto", "custom", "random"]);
   assert.deepEqual([...AUTO_ORDERS].sort(), ["bottom-up", "left-right", "path", "right-left", "top-down"]);
 });
@@ -54,7 +54,7 @@ test("readSettings keeps valid values and drops unknown fields", () => {
     enabled: false,
     maxBrightness: 42,
     pinnedStyle: "glow",
-    pinnedLevel: 60,
+    pinnedBrightness: 60,
     pinnedProgress: false,
     track: false,
     scheduleAlert: false,
@@ -70,29 +70,29 @@ test("readSettings: each bad field falls back on its own", () => {
   for (const bad of NOT_BOOLEANS) {
     const read = readSettings({ enabled: bad, pinnedProgress: bad, track: bad, maxBrightness: 50 });
     assert.equal(read.enabled, true);
-    assert.equal(read.pinnedProgress, true);
+    assert.equal(read.pinnedProgress, false);
     assert.equal(read.track, true);
     assert.equal(read.maxBrightness, 50, "a bad field leaves the good ones alone");
   }
   for (const bad of NOT_NUMBERS) {
-    const read = readSettings({ maxBrightness: bad, pinnedLevel: bad, viewRotation: bad, idle: "off" });
+    const read = readSettings({ maxBrightness: bad, pinnedBrightness: bad, viewRotation: bad, idle: "off" });
     assert.equal(read.maxBrightness, 80, String(bad));
-    assert.equal(read.pinnedLevel, 35, String(bad));
+    assert.equal(read.pinnedBrightness, 28, String(bad));
     assert.equal(read.viewRotation, 0, String(bad));
     assert.equal(read.idle, "off");
   }
   for (const bad of ["Pulse", "GLOW", "flash", "", null, 1, ["glow"]]) {
     assert.equal(readSettings({ pinnedStyle: bad }).pinnedStyle, "pulse");
   }
-  for (const bad of ["Off", "restore ", "dark", null, 0, {}]) assert.equal(readSettings({ idle: bad }).idle, "restore");
+  for (const bad of ["Off", "restore ", "dark", null, 0, {}]) assert.equal(readSettings({ idle: bad }).idle, "off");
 });
 
 test("readSettings clamps and rounds numbers into their ranges", () => {
   const brightness = (value) => readSettings({ maxBrightness: value }).maxBrightness;
   const inputs = [0, 4.4, 5, 55.5, 99.6, 100, 101, 1e9, -1e9, -0];
   assert.deepEqual(inputs.map(brightness), [5, 5, 5, 56, 100, 100, 100, 100, 5, 5]);
-  const level = (value) => readSettings({ pinnedLevel: value }).pinnedLevel;
-  assert.deepEqual([0, 9.6, 10, 33.4, 80, 80.4, 81, 200, -5].map(level), [10, 10, 10, 33, 80, 80, 80, 80, 10]);
+  const pinned = (value) => readSettings({ pinnedBrightness: value }).pinnedBrightness;
+  assert.deepEqual(inputs.map(pinned), [5, 5, 5, 56, 100, 100, 100, 100, 5, 5], "a pin's own brightness, the same range");
 });
 
 test("readSettings snaps viewRotation to a multiple of 30 in [0, 360)", () => {
@@ -128,12 +128,13 @@ test("readOrder: garbage gives the default order", () => {
 });
 
 test("readOrder validates each field", () => {
-  const valid = { mode: "custom", auto: "top-down", ids: [3, 1, 2], seed: 42 };
+  const valid = { mode: "custom", auto: "top-down", ids: [3, 1, 2], seed: 42, sweepFill: "panels" };
   assert.deepEqual(readOrder(valid), valid);
+  for (const bad of ["Line", "rows", "", null, 1]) assert.equal(readOrder({ sweepFill: bad }).sweepFill, "line");
   for (const mode of ORDER_MODES) assert.equal(readOrder({ mode }).mode, mode);
   for (const auto of AUTO_ORDERS) assert.equal(readOrder({ auto }).auto, auto);
   for (const bad of ["shuffle", "Auto", "", null, 3]) assert.equal(readOrder({ mode: bad }).mode, "auto");
-  for (const bad of ["diagonal", "Path", "", null, {}]) assert.equal(readOrder({ auto: bad }).auto, "path");
+  for (const bad of ["diagonal", "Path", "", null, {}]) assert.equal(readOrder({ auto: bad }).auto, "bottom-up");
 });
 
 test("readOrder keeps unique non-negative integer ids, first copy first", () => {

@@ -1,7 +1,7 @@
 import { useReducedMotion } from "motion/react";
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { isAnimating, renderFrame } from "../../../shared/render.ts";
-import type { PanelLight, RenderState } from "../../../shared/types.ts";
+import type { FillSpan, PanelLight, RenderState } from "../../../shared/types.ts";
 import type { RenderStateRef } from "./useRenderState.ts";
 
 /**
@@ -14,36 +14,47 @@ export type FrameWriter = (lights: ReadonlyMap<number, PanelLight>, t: number) =
  * The one light loop: a `requestAnimationFrame` loop that runs the shared `renderFrame` over `order` and hands the
  * result to `onFrame`. It skips frames while nothing moves (drawing once more as motion ends, so the last frame is
  * exact), pauses while the document is hidden, and passes the user's reduced-motion preference to the renderer.
+ * `spans` is each panel's share of a goal when the order fills as a line (order.ts `fillSpans`), as main draws it.
  */
-export function useLights(stateRef: RenderStateRef, order: readonly number[], onFrame: FrameWriter): void {
+export function useLights(
+  stateRef: RenderStateRef,
+  order: readonly number[],
+  onFrame: FrameWriter,
+  spans: readonly FillSpan[] | null = null,
+): void {
   const reduced = useReducedMotion() ?? false;
-  const latest = useRef({ order, onFrame, reduced });
+  const latest = useRef({ order, onFrame, reduced, spans });
   useLayoutEffect(() => {
-    latest.current = { order, onFrame, reduced };
-  }, [order, onFrame, reduced]);
+    latest.current = { order, onFrame, reduced, spans };
+  }, [order, onFrame, reduced, spans]);
 
   useEffect(() => {
     let raf = 0;
-    let drawn: { state: RenderState | null; order: unknown; onFrame: unknown; reduced: boolean } = {
+    let drawn: { state: RenderState | null; order: unknown; onFrame: unknown; reduced: boolean; spans: unknown } = {
       state: null,
       order: null,
       onFrame: null,
       reduced: false,
+      spans: null,
     };
     let moving = false;
 
     const draw = () => {
-      const { order, onFrame, reduced } = latest.current;
+      const { order, onFrame, reduced, spans } = latest.current;
       const state = stateRef.current;
       const t = Date.now();
       const changed =
-        state !== drawn.state || order !== drawn.order || onFrame !== drawn.onFrame || reduced !== drawn.reduced;
+        state !== drawn.state ||
+        order !== drawn.order ||
+        onFrame !== drawn.onFrame ||
+        reduced !== drawn.reduced ||
+        spans !== drawn.spans;
       const animating = isAnimating(state, t);
       // One more frame after motion stops lands every panel exactly on its resting value.
       if (!changed && !animating && !moving) return;
       moving = animating;
-      drawn = { state, order, onFrame, reduced };
-      onFrame(renderFrame(state, order, t, { reducedMotion: reduced }), t);
+      drawn = { state, order, onFrame, reduced, spans };
+      onFrame(renderFrame(state, order, t, { reducedMotion: reduced, spans }), t);
     };
     const frame = () => {
       raf = requestAnimationFrame(frame);
