@@ -302,8 +302,8 @@ importers:
         version: 19.2.0(react@19.2.0)
     devDependencies:
       '@drift-beacon/plugin':
-        specifier: ^0.2.11
-        version: 0.2.11(typescript@5.9.3)(vite@7.1.2(@types/node@25.9.8)(jiti@2.7.0)(lightningcss@1.32.0))
+        specifier: ^0.2.12
+        version: 0.2.12(typescript@5.9.3)(vite@7.1.2(@types/node@25.9.8)(jiti@2.7.0)(lightningcss@1.32.0))
       '@tailwindcss/vite':
         specifier: ^4.1.18
         version: 4.3.3(vite@7.1.2(@types/node@25.9.8)(jiti@2.7.0)(lightningcss@1.32.0))
@@ -438,6 +438,19 @@ packages:
 
   '@drift-beacon/plugin@0.2.11':
     resolution: {integrity: sha512-KkOAi+HM6/3+nBqAOeSbTaZucFlA5Q/0IqOPneJVqIz8kqzuoBQ4A4gbNY6Czzy/Oc1hL1FmAGoDPG9nN++DgA==}
+    engines: {node: '>=22.13'}
+    hasBin: true
+    peerDependencies:
+      typescript: '>=5.9'
+      vite: ^7.1.2 || ^8.0.0
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+      vite:
+        optional: true
+
+  '@drift-beacon/plugin@0.2.12':
+    resolution: {integrity: sha512-7HLCGyplEUQvIYJAyyHiNAB+CddannNn0InYw7nF4qT1GPMyRM6S8doXdg3dikLamgcMHaR4sJr59Ot/myS1pQ==}
     engines: {node: '>=22.13'}
     hasBin: true
     peerDependencies:
@@ -3187,6 +3200,13 @@ snapshots:
       '@babel/helper-validator-identifier': 7.29.7
 
   '@drift-beacon/plugin@0.2.11(typescript@5.9.3)(vite@7.1.2(@types/node@25.9.8)(jiti@2.7.0)(lightningcss@1.32.0))':
+    dependencies:
+      fflate: 0.8.3
+    optionalDependencies:
+      typescript: 5.9.3
+      vite: 7.1.2(@types/node@25.9.8)(jiti@2.7.0)(lightningcss@1.32.0)
+
+  '@drift-beacon/plugin@0.2.12(typescript@5.9.3)(vite@7.1.2(@types/node@25.9.8)(jiti@2.7.0)(lightningcss@1.32.0))':
     dependencies:
       fflate: 0.8.3
     optionalDependencies:
