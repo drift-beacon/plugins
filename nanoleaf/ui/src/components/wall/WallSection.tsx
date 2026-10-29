@@ -17,7 +17,7 @@ import { useModel } from "../../model.ts";
 import { EASE_OUT } from "../../motion.ts";
 import { swapIds } from "./badges.ts";
 import { Compass } from "./Compass.tsx";
-import { DraftPanel, type DraftSource } from "./DraftPanel.tsx";
+import { DraftPanel } from "./DraftPanel.tsx";
 import {
   customOrder,
   leavesCustom,
@@ -57,9 +57,8 @@ const NO_PANELS: readonly PlacedPanel[] = [];
 /** Appended to a repeated announcement so a screen reader reads it again. */
 const ZERO_WIDTH_SPACE = String.fromCharCode(0x200b);
 
-/** Tap to order in progress: where taps come from and the panels numbered so far. */
+/** Tap to order in progress: how it started and the panels numbered so far. */
 interface Draft {
-  readonly source: DraftSource;
   /** Started from the keyboard: focus goes to the drawing's first panel rather than the draft panel. */
   readonly keyboard: boolean;
   readonly ids: readonly number[];
@@ -145,7 +144,7 @@ export function WallSection({
   const [plays, setPlays] = useState(0);
   const [goal, setGoal] = useState<number | null>(null);
   const [toast, setToast] = useState<ToastMessage | null>(null);
-  const [refocus, setRefocus] = useState<DraftSource | null>(null);
+  const [refocus, setRefocus] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const timers = useRef({ emphasis: 0, play: 0, goal: 0, finish: 0 });
   const sectionRef = useRef<HTMLElement>(null);
@@ -239,7 +238,7 @@ export function WallSection({
   const chooseMode = (mode: OrderMode) => {
     if (mode === saved.mode) return;
     commit(orderForMode(saved, mode, resolved));
-    setRefocus(null);
+    setRefocus(false);
     keptIfLeaving(mode);
     announce(
       mode === "custom"
@@ -292,14 +291,14 @@ export function WallSection({
    * it, unless the user has moved on.
    */
   const endDraft = useCallback(() => {
-    const source = draftRef.current?.source ?? null;
+    const wasDrafting = draftRef.current !== null;
     window.clearTimeout(timers.current.finish);
     showLocal(null);
     showWall(null);
     updateDraft(null);
     setFocus(null);
     const el = document.activeElement;
-    if (source && (!el || el === document.body || sectionRef.current?.contains(el))) setRefocus(source);
+    if (wasDrafting && (!el || el === document.body || sectionRef.current?.contains(el))) setRefocus(true);
   }, [updateDraft, showLocal, showWall]);
 
   const cancelDraft = useCallback(() => {
@@ -352,19 +351,21 @@ export function WallSection({
     stageRef.current?.querySelector<SVGElement>("[data-panel][tabindex]")?.focus({ preventScroll: true });
   }, [draft]);
 
-  const startDraft = (source: DraftSource, keyboard: boolean) => {
+  const startDraft = (keyboard: boolean) => {
     stopPreviews();
-    setRefocus(null);
-    focusDraft.current = source === "stage" && keyboard;
-    updateDraft({ source, keyboard, ids: [] });
+    setRefocus(false);
+    focusDraft.current = keyboard;
+    updateDraft({ keyboard, ids: [] });
     setFocus(null);
     // Narrow, the drawing sits above the editor: bring it into view to be tapped.
     stageRef.current?.scrollIntoView({ block: "nearest", behavior: reduced ? "auto" : "smooth" });
     announce(
-      source === "wall" ? "Touch the panels on your wall in order" : "Tap the panels in the order they should fill",
+      canTouch
+        ? "Tap the panels on the drawing or on your wall, in the order they should fill"
+        : "Tap the panels in the order they should fill",
     );
   };
-  const refocused = useCallback(() => setRefocus(null), []);
+  const refocused = useCallback(() => setRefocus(false), []);
 
   const tapDraft = (id: number) => {
     const current = draftRef.current;
@@ -572,11 +573,10 @@ export function WallSection({
 
   const draftPanel = draft ? (
     <DraftPanel
-      source={draft.source}
       count={draft.ids.length}
       total={n}
       accent={accent}
-      autoFocus={!(draft.source === "stage" && draft.keyboard)}
+      autoFocus={!draft.keyboard}
       onUndo={undoDraft}
       onReset={() => {
         window.clearTimeout(timers.current.finish);
@@ -599,7 +599,6 @@ export function WallSection({
           <motion.div key="editor" {...swapMotion} transition={{ duration: 0.2, ease: EASE_OUT }}>
             <Compass
               order={saved}
-              canTouch={canTouch}
               refocus={refocus}
               onMode={chooseMode}
               onAuto={chooseAuto}

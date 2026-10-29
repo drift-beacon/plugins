@@ -1,5 +1,5 @@
 import { Button } from "@heroui/react";
-import { Check, Eraser, Hand, MousePointerClick, Undo2 } from "lucide-react";
+import { Check, Eraser, MousePointerClick, Undo2 } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { cssRgb } from "../../../../shared/color.ts";
 import type { Rgb } from "../../../../shared/types.ts";
@@ -9,11 +9,7 @@ import { Odometer } from "./Odometer.tsx";
 /** A button with nothing to do yet: faded and inert, but still focusable. */
 const EMPTY = "aria-disabled:cursor-default aria-disabled:opacity-40 aria-disabled:active:scale-100";
 
-/** Where the taps come from: the drawing, or the panels on the wall (touch events). */
-export type DraftSource = "stage" | "wall";
-
 interface DraftPanelProps {
-  readonly source: DraftSource;
   /** Panels numbered so far. */
   readonly count: number;
   readonly total: number;
@@ -27,13 +23,13 @@ interface DraftPanelProps {
 }
 
 /**
- * Tap to order, the editor's side: what to do, how far along ("3 of 8"), and Undo / Start over / Cancel / Done.
- * Backspace undoes and Escape cancels, from anywhere but a text field. Undo, Start over and Done stay focusable when
+ * Tap to order, the editor's side: its title, a line under it saying what Done will add (or, before the first tap,
+ * the keys), how far along ("3 of 8"), and Undo / Start over / Cancel / Done. Backspace undoes and Escape cancels, from anywhere but a text field. Undo, Start over and Done stay focusable when
  * there is nothing to act on (aria-disabled), so undoing down to zero never drops keyboard focus to the page. The
- * keys are only mentioned where a mouse or trackpad suggests a keyboard: a phone's hint is about tapping alone.
+ * keys are only mentioned where a mouse or trackpad suggests a keyboard.
  */
 export function DraftPanel(props: DraftPanelProps) {
-  const { source, count, total, accent, autoFocus, onUndo, onReset, onCancel, onDone } = props;
+  const { count, total, accent, autoFocus, onUndo, onReset, onCancel, onDone } = props;
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (autoFocus) root.current?.focus({ preventScroll: true });
@@ -53,21 +49,18 @@ export function DraftPanel(props: DraftPanelProps) {
   }, [count, onCancel, onUndo]);
 
   const keyboard = useMediaQuery("(any-pointer: fine)");
-  const wall = source === "wall";
   const left = total - count;
   const keys = keyboard ? "Backspace undoes, Escape cancels." : "";
   const hint =
     count > 0 && left > 0
       ? `Done adds the ${left} ${left === 1 ? "panel" : "panels"} you haven't tapped at the end, in path order.`
-      : wall
-        ? `You can tap the drawing too. ${keys}`.trim()
-        : keys;
+      : keys;
   return (
     <div
       ref={root}
       tabIndex={-1}
       role="group"
-      aria-label={wall ? "Tap on your wall" : "Tap to order"}
+      aria-label="Tap to order"
       className="space-y-4 outline-none"
     >
       <div className="flex items-start gap-3">
@@ -75,17 +68,11 @@ export function DraftPanel(props: DraftPanelProps) {
           className="grid h-10 w-10 shrink-0 place-items-center rounded-xl"
           style={{ background: cssRgb(accent, 0.16), color: cssRgb(accent) }}
         >
-          {wall ? <Hand className="wall-tap h-5 w-5" /> : <MousePointerClick className="h-5 w-5" />}
+          <MousePointerClick className="h-5 w-5" />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="font-semibold text-[10px] text-default-400 uppercase tracking-wider">
-            {wall ? "Tap on your wall" : "Tap to order"}
-          </div>
-          <div className="text-sm leading-snug">
-            {wall
-              ? "Touch each panel on the wall once, in the order it should fill."
-              : "Tap the panels in the order they should fill."}
-          </div>
+          <div className="font-semibold text-sm leading-snug">Tap to order</div>
+          {hint && <p className="mt-0.5 text-default-500 text-xs leading-snug">{hint}</p>}
         </div>
         <div className="shrink-0 text-right">
           <span className="font-bold text-2xl leading-none">
@@ -153,7 +140,6 @@ export function DraftPanel(props: DraftPanelProps) {
           </Button>
         </div>
       </div>
-      {hint && <p className="text-default-500 text-xs">{hint}</p>}
     </div>
   );
 }

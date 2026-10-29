@@ -57,20 +57,6 @@
   animation: wall-march 1.4s linear infinite;
 }
 
-/* Tap on your wall: the hand taps while the wall is listening. */
-@keyframes wall-tap {
-  0%,
-  100% {
-    transform: translateY(0) scale(1);
-  }
-  40% {
-    transform: translateY(2px) scale(0.92);
-  }
-}
-.wall-tap {
-  animation: wall-tap 1.2s var(--wall-ease-out) infinite;
-}
-
 /* Keyboard focus on a panel while drafting: an outline the pointer never shows. */
 .wall-hit:focus-visible {
   stroke: var(--db-focus);
@@ -137,8 +123,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .wall-march,
-  .wall-tap {
+  .wall-march {
     animation: none;
   }
   /* Separate rules: a browser drops a whole rule over a pseudo-element it doesn't know. */

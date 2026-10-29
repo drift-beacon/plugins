@@ -1,12 +1,11 @@
 import { cn } from "@heroui/theme";
-import { Hand, MousePointerClick } from "lucide-react";
+import { MousePointerClick } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { type KeyboardEvent, useEffect, useRef } from "react";
 import type { AutoOrder, OrderMode, PanelOrder, SweepFill } from "../../../../shared/types.ts";
 import { rovingStep } from "../../lib/roving.ts";
 import { EASE_OUT } from "../../motion.ts";
-import type { DraftSource } from "./DraftPanel.tsx";
-import { type Direction, DIRECTIONS, hintFor, type Kind, KINDS, nameFor, orderChoice } from "./orderChoice.ts";
+import { type Direction, DIRECTIONS, type Kind, KINDS, orderChoice } from "./orderChoice.ts";
 
 /** The pad's cells, by row: the arrows where they point, the middle left as the wall the light crosses. */
 const PAD: readonly (Direction | "centre" | null)[] = [
@@ -36,10 +35,8 @@ const ACTION =
 
 interface CompassProps {
   readonly order: PanelOrder;
-  /** The controller's event stream is open, so panels touched on the wall can be numbered. */
-  readonly canTouch: boolean;
-  /** Tap to order just ended from this button: it takes keyboard focus back once it's here. */
-  readonly refocus: DraftSource | null;
+  /** Tap to order just ended: its button takes keyboard focus back once it's here. */
+  readonly refocus: boolean;
   onMode(mode: OrderMode): void;
   onAuto(auto: AutoOrder): void;
   onShuffle(): void;
@@ -48,7 +45,7 @@ interface CompassProps {
   /** The chosen direction pressed again: play the order once. */
   onPreview(): void;
   /** Start tap to order; `keyboard` when the button was pressed from the keyboard (focus then goes to a panel). */
-  onDraft(source: DraftSource, keyboard: boolean): void;
+  onDraft(keyboard: boolean): void;
   onRefocused(): void;
 }
 
@@ -56,7 +53,7 @@ interface CompassProps {
  * The fill order as a compass: a sweep's direction drawn as a direction. The four arrows sit on a cross where they
  * point, the way a sweep fills in the middle (as a line, or one panel at a time); Path, Shuffle and My own stack
  * beside it. A chosen arrow pressed again plays the order, and Shuffle pressed again rolls a fresh mix. Under both,
- * one line says what the chosen order does and, for My own, carries its two ways to number the panels.
+ * for My own only, the button that starts numbering the panels.
  */
 export function Compass(props: CompassProps) {
   const { order, refocus, onRefocused } = props;
@@ -162,26 +159,20 @@ export function Compass(props: CompassProps) {
         </div>
       </div>
 
-      <div className="mt-3 border-default-100 border-t pt-3">
-        <AnimatePresence mode="wait" initial={false}>
+      <AnimatePresence initial={false}>
+        {choice.kind === "custom" && (
           <motion.div
-            key={`${choice.kind}-${choice.direction}`}
-            className="space-y-2.5"
+            key="custom"
+            className="mt-3 border-default-100 border-t pt-3"
             initial={reduced ? { opacity: 0 } : { opacity: 0, transform: "translateY(4px)" }}
             animate={{ opacity: 1, transform: "translateY(0px)" }}
             exit={{ opacity: 0, transition: { duration: 0.1 } }}
             transition={{ duration: 0.18, ease: EASE_OUT }}
           >
-            <p className="text-sm leading-snug">
-              <span className="font-semibold">{nameFor(order)}</span>{" "}
-              <span className="text-default-500">· {hintFor(order)}</span>
-            </p>
-            {choice.kind === "custom" && (
-              <MakeOwn canTouch={props.canTouch} refocus={refocus} onRefocused={onRefocused} onDraft={props.onDraft} />
-            )}
+            <MakeOwn refocus={refocus} onRefocused={onRefocused} onDraft={props.onDraft} />
           </motion.div>
-        </AnimatePresence>
-      </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -245,42 +236,27 @@ function SweepFillToggle({
 
 /** My own's two ways to number the panels: tap the drawing, or touch the wall itself (when it reports touches). */
 function MakeOwn({
-  canTouch,
   refocus,
   onRefocused,
   onDraft,
-}: Pick<CompassProps, "canTouch" | "refocus" | "onRefocused" | "onDraft">) {
-  const stageButton = useRef<HTMLButtonElement>(null);
-  const wallButton = useRef<HTMLButtonElement>(null);
+}: Pick<CompassProps, "refocus" | "onRefocused" | "onDraft">) {
+  const button = useRef<HTMLButtonElement>(null);
   // Back from tap to order (Done, Cancel, Escape): focus returns to the button that started it, not to the page.
   useEffect(() => {
     if (!refocus) return;
-    const el = (refocus === "wall" ? wallButton.current : null) ?? stageButton.current;
-    el?.focus({ preventScroll: true });
+    button.current?.focus({ preventScroll: true });
     onRefocused();
   }, [refocus, onRefocused]);
   return (
-    <>
-      {/* Side by side only where both labels fit on one line (the editor card is a container). */}
-      <div className={cn("grid gap-2", canTouch && "@sm:grid-cols-2")}>
-        <button
-          ref={stageButton}
-          type="button"
-          // A click from the keyboard (Enter, Space, a screen reader) has no pointer: detail is 0.
-          onClick={(e) => onDraft("stage", e.detail === 0)}
-          className={ACTION}
-        >
-          <MousePointerClick className="h-4 w-4" aria-hidden />
-          Tap the drawing
-        </button>
-        {canTouch && (
-          <button ref={wallButton} type="button" onClick={(e) => onDraft("wall", e.detail === 0)} className={ACTION}>
-            <Hand className="h-4 w-4" aria-hidden />
-            Touch your wall
-          </button>
-        )}
-      </div>
-      <p className="text-default-500 text-xs">Or drag a number on the drawing onto another panel to swap the two.</p>
-    </>
+    <button
+      ref={button}
+      type="button"
+      // A click from the keyboard (Enter, Space, a screen reader) has no pointer: detail is 0.
+      onClick={(e) => onDraft(e.detail === 0)}
+      className={cn(ACTION, "w-full")}
+    >
+      <MousePointerClick className="h-4 w-4" aria-hidden />
+      Edit panel order
+    </button>
   );
 }
