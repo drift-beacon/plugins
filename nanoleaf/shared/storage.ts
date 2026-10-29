@@ -3,9 +3,12 @@
  * another version of the plugin, another device or a person with a JSON editor. A bad or missing field falls back to
  * its default and numbers are clamped, so callers never see a half-valid value.
  */
+import { GESTURE_KINDS, GESTURES } from "./gestures.ts";
 import type {
   AutoOrder,
   ControllerConfig,
+  GestureAction,
+  GestureActions,
   Handback,
   IdleBehaviour,
   Layout,
@@ -30,6 +33,12 @@ export const DEFAULT_SETTINGS: Settings = Object.freeze({
   allowControl: true,
   idle: "off",
   viewRotation: 0,
+  gestures: true,
+  // The two that follow what's going on; nothing for a chosen activity, which only the user can pick.
+  gestureActions: Object.freeze({
+    "double-tap": Object.freeze({ kind: "pause-resume" }),
+    "swipe-down": Object.freeze({ kind: "stop-unpin" }),
+  }) as GestureActions,
 });
 
 /** Rise from the bottom as a straight line, like a glass filling up, until the user picks something else. */
@@ -125,7 +134,29 @@ export function readSettings(raw: unknown): Settings {
     allowControl: readBoolean(raw.allowControl, d.allowControl),
     idle: readOneOf(raw.idle, IDLE_BEHAVIOURS, d.idle),
     viewRotation: rotation,
+    gestures: readBoolean(raw.gestures, d.gestures),
+    gestureActions: raw.gestureActions === undefined ? d.gestureActions : readGestureActions(raw.gestureActions),
   };
+}
+
+/**
+ * What each gesture does: unknown gestures and actions are dropped, and an action for a chosen activity needs its id.
+ * Anything that isn't an object reads as no gestures at all (missing reads as the defaults, in readSettings).
+ */
+export function readGestureActions(raw: unknown): GestureActions {
+  if (!isRecord(raw)) return {};
+  const actions: Partial<Record<(typeof GESTURES)[number], GestureAction>> = {};
+  for (const gesture of GESTURES) {
+    const action = raw[gesture];
+    if (!isRecord(action) || !GESTURE_KINDS.includes(action.kind as GestureAction["kind"])) continue;
+    if (action.kind === "start" || action.kind === "pin") {
+      const id = typeof action.activityId === "string" ? action.activityId.trim() : "";
+      if (id !== "") actions[gesture] = { kind: action.kind, activityId: id };
+    } else {
+      actions[gesture] = { kind: action.kind as "pause-resume" | "stop-unpin" };
+    }
+  }
+  return actions;
 }
 
 /**

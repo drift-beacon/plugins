@@ -34,6 +34,8 @@ test("defaults are the documented ones", () => {
     allowControl: true,
     idle: "off",
     viewRotation: 0,
+    gestures: true,
+    gestureActions: { "double-tap": { kind: "pause-resume" }, "swipe-down": { kind: "stop-unpin" } },
   });
   assert.deepEqual(DEFAULT_ORDER, { mode: "auto", auto: "bottom-up", ids: [], seed: 1, sweepFill: "line" });
   assert.ok(Object.isFrozen(DEFAULT_SETTINGS));
@@ -61,6 +63,8 @@ test("readSettings keeps valid values and drops unknown fields", () => {
     allowControl: false,
     idle: "off",
     viewRotation: 270,
+    gestures: false,
+    gestureActions: { tap: { kind: "start", activityId: "a1" }, "swipe-left": { kind: "pin", activityId: "a2" } },
   };
   assert.deepEqual(readSettings(valid), valid);
   assert.deepEqual(readSettings({ ...valid, token: "secret", extra: [1] }), valid);

@@ -95,6 +95,8 @@ export interface NanoleafModel {
     /** Fire and forget: failures are swallowed (the preview is a nicety). */
     preview(request: PreviewRequest): Promise<void>;
     brightness(value: number): Promise<void>;
+    /** Tell main this copy is numbering panels (tap to order), or has stopped. Fire and forget. */
+    numbering(on: boolean): Promise<void>;
   };
   /** Physical panel touches, while the controller's event stream is open. Returns an unsubscribe. */
   onTouch(listener: (panelId: number, gesture: TouchGesture) => void): () => void;

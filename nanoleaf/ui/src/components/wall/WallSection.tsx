@@ -323,6 +323,13 @@ export function WallSection({
   const drafting = draft !== null;
   useEffect(() => setDrafting(drafting), [drafting]);
   useEffect(() => () => setDrafting(false), []);
+  // Main hears it too, so gestures on the wall leave the workspace alone meanwhile, whether or not it drives the wall.
+  const { numbering } = model.actions;
+  useEffect(() => {
+    if (!drafting) return;
+    void numbering(true);
+    return () => void numbering(false);
+  }, [drafting, numbering]);
 
   const finishDraft = useCallback(
     (ids: readonly number[]) => {

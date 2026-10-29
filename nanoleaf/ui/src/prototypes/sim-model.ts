@@ -54,7 +54,7 @@ export type SimAction =
   | { type: "unauthorized" }
   | { type: "takeover" }
   | { type: "control" }
-  | { type: "tap" }
+  | { type: "tap"; readonly gesture?: TouchGesture }
   | { type: "busy" }
   | { type: "main" }
   | { type: "elsewhere" }
@@ -505,6 +505,7 @@ export function useSimModel(layoutKey: LayoutKey | null, options: SimOptions): N
         requireMain();
         update((s) => ({ ...s, override: { value: Math.round(value), until: Date.now() + 3000 } }));
       },
+      async numbering() {},
     }),
     [requireMain, update, wait, changed],
   );
@@ -604,8 +605,10 @@ export function useSimModel(layoutKey: LayoutKey | null, options: SimOptions): N
         case "tap": {
           const ids = lightPanelIds(s.layout);
           if (!ids.length || s.connection.status !== "connected") break;
-          const id = ids[Math.floor(Math.random() * ids.length)];
-          for (const listener of listeners.current) listener(id, "tap");
+          // A swipe is the whole wall's, so it names no panel (-1), as the controller reports it.
+          const gesture = action.gesture ?? "tap";
+          const id = gesture.startsWith("swipe") ? -1 : ids[Math.floor(Math.random() * ids.length)];
+          for (const listener of listeners.current) listener(id, gesture);
           break;
         }
         case "busy":

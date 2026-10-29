@@ -2,6 +2,7 @@ import { cn } from "@heroui/theme";
 import type { ReactNode } from "react";
 import { ControllerCard } from "./ControllerCard.tsx";
 import { NowCard } from "./NowCard.tsx";
+import { ControlsCard } from "./controls/Controls.tsx";
 import { useSettingsGroups } from "./SettingsPanel.tsx";
 import { Starfield } from "./Starfield.tsx";
 import { HORIZON_OVERLAP } from "./wall/Horizon.tsx";
@@ -33,7 +34,8 @@ function StateCard({ children, className }: { children: ReactNode; className?: s
  * look at, with no card: the drawing hangs in a patch of night sky (twinkling stars that fade into the page at every
  * edge), its light lying under it as a horizon, and what it shows now sitting on that line, with how bright under it. The side is what you change (how it fills, then the controller
  * with what the wall does when nothing is going on). Under them the settings are the wall's situations, one card
- * each: an activity pinned, a session live, a schedule firing, other plugins.
+ * each: an activity pinned, a session live, a schedule firing, other plugins; then Controls, what gestures on the
+ * wall do.
  */
 export function Board({ parts }: { parts: WallParts }) {
   const light = useSettingsGroups();
@@ -73,6 +75,8 @@ export function Board({ parts }: { parts: WallParts }) {
         <StateCard>{light.schedule}</StateCard>
         <StateCard className="col-span-2">{light.plugins}</StateCard>
       </div>
+      <h2 className="px-1 pt-1 font-semibold text-sm">Controls</h2>
+      <ControlsCard />
     </div>
   );
 }

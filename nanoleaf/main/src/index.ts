@@ -17,11 +17,12 @@ import {
 import { readEffect } from "../../shared/effects.ts";
 import { DEFAULT_PORT, readSettings } from "../../shared/storage.ts";
 import { type ActivityLike, type FoundController, type SessionLike, STORAGE_KEYS } from "../../shared/types.ts";
-import { BRIGHTNESS_INPUT, DISCOVER_INPUT, PAIR_INPUT, PREVIEW_INPUT } from "../../shared/ui-channel.ts";
+import { BRIGHTNESS_INPUT, DISCOVER_INPUT, NUMBERING_INPUT, PAIR_INPUT, PREVIEW_INPUT } from "../../shared/ui-channel.ts";
 import { brightnessState, saveBrightness } from "./brightness.ts";
 import { createOwner } from "./claims.ts";
 import { Controller, type ControllerTimings } from "./controller.ts";
 import { createDirector, type Director, type DirectorTimings } from "./director.ts";
+import { createGestures, type GestureActions } from "./gestures.ts";
 import { assertLanHost, type Lookup } from "./lan.ts";
 import { discover } from "./nanoleaf/discovery.ts";
 import { EventStream, type Touch } from "./nanoleaf/events.ts";
@@ -105,6 +106,17 @@ export function startNanoleaf(ctx: MainContext, options: NanoleafPluginOptions =
     onDeviceError: (error) => controller?.reportError(error),
   });
 
+  // Open copies of the interface that are numbering panels (tap to order): their taps on the wall are numbers.
+  const numbering = new Set<string>();
+  const onGesture = createGestures({
+    userId: ctx.user.id,
+    settings: () => readSettings(ctx.storage.get(STORAGE_KEYS.settings)),
+    data: workspaceData(ctx),
+    drafting: () => director.drafting || numbering.size > 0,
+    actions: gestureActions(ctx),
+    log,
+  });
+
   const wired = new Controller({
     storage: ctx.storage,
     log,
@@ -119,13 +131,16 @@ export function startNanoleaf(ctx: MainContext, options: NanoleafPluginOptions =
     onLink: (link) => director.setLink(link),
     onLayout: () => director.update(),
     onDeviceEvent: (event) => director.onDeviceEvent(event),
-    onTouch: (touch) => emitTouch(ctx, touch),
+    onTouch: (touch) => {
+      emitTouch(ctx, touch);
+      void onGesture(touch.gesture);
+    },
     handBack: () => director.handBack(),
     timings: options.controller,
   });
   controller = wired;
 
-  registerRequests(ctx, wired, director, find);
+  registerRequests(ctx, wired, director, find, numbering);
   ctx.commands.handle("resume", () => {
     director.resume();
   });
@@ -179,7 +194,13 @@ export function holderOf(caller: CommandCaller): string {
  * is a Home Assistant action or reachable from another plugin. Inputs are checked against shared/ui-channel.ts before
  * a handler runs. Device errors become `PluginError`s the interface can explain.
  */
-function registerRequests(ctx: MainContext, controller: Controller, director: Director, find: Find): void {
+function registerRequests(
+  ctx: MainContext,
+  controller: Controller,
+  director: Director,
+  find: Find,
+  numbering: Set<string>,
+): void {
   const { ui, log } = ctx;
   /**
    * Tells open copies something. A post that can't be sent (the instance is stopping) is logged, not worth failing the
@@ -233,7 +254,21 @@ function registerRequests(ctx: MainContext, controller: Controller, director: Di
   // A preview belongs to the copy that asked: its lease ends early when that copy closes (the lease's time limit is
   // the backstop, since a closed copy is reported only after a few seconds).
   ui.handle("preview", (input, meta) => director.preview(input, meta.client.id), { input: PREVIEW_INPUT });
-  ui.onClientsChange((clients) => director.endPreviewsExcept(new Set(clients.map((client) => client.id))));
+  ui.onClientsChange((clients) => {
+    const open = new Set(clients.map((client) => client.id));
+    director.endPreviewsExcept(open);
+    // A copy that closed mid-way stops counting as numbering.
+    for (const id of numbering) if (!open.has(id)) numbering.delete(id);
+  });
+
+  ui.handle(
+    "numbering",
+    (input, meta) => {
+      if (input.on) numbering.add(meta.client.id);
+      else numbering.delete(meta.client.id);
+    },
+    { input: NUMBERING_INPUT },
+  );
 
   ui.handle("brightness", (input) => director.brightness(input.value), { input: BRIGHTNESS_INPUT });
 
@@ -287,6 +322,28 @@ function workspaceData(ctx: MainContext): () => WorkspaceData {
       sessions = nextSessions.map((session) => session.data);
     }
     return { activities, sessions };
+  };
+}
+
+/**
+ * What gestures do to the workspace, through the SDK as the user. `pause`, `pin` and `unpin` arrived in SDK 0.2.12:
+ * main code runs against the app's own SDK, so on an older Drift Beacon they are missing, and say so.
+ */
+function gestureActions(ctx: MainContext): GestureActions {
+  const needs = <T>(fn: T | undefined, what: string): T => {
+    if (typeof fn !== "function") throw new PluginError("unsupported", `${what} needs a newer Drift Beacon`);
+    return fn;
+  };
+  return {
+    pause: (sessionId) => needs(ctx.sessions.pause, "Pausing").call(ctx.sessions, sessionId),
+    stop: (sessionId) => ctx.sessions.end(sessionId),
+    track: async (activityId) => {
+      const activity = ctx.activities.get(activityId);
+      if (!activity) throw new PluginError("not-found", "That activity is gone");
+      return activity.track();
+    },
+    pin: (activityId) => needs(ctx.activities.pin, "Pinning").call(ctx.activities, activityId),
+    unpin: (activityId) => needs(ctx.activities.unpin, "Unpinning").call(ctx.activities, activityId),
   };
 }
 

@@ -185,7 +185,24 @@ export interface Settings {
    * with it too. A random order doesn't depend on it.
    */
   readonly viewRotation: number;
+  /** Act on gestures made on the wall (Controls): what each one does is `gestureActions`. */
+  readonly gestures: boolean;
+  /** What each gesture does; a gesture left out does nothing. gestures.ts resolves one against what's going on. */
+  readonly gestureActions: GestureActions;
 }
+
+/**
+ * What a gesture on the wall does (Controls). Two follow what's going on: `pause-resume` pauses the live session or
+ * starts the pinned activity; `stop-unpin` stops the live session or unpins the pinned activity. The other two act on
+ * one chosen activity, whatever is going on: `start` tracks it (starts a span, marks a point), `pin` pins it.
+ */
+export type GestureAction =
+  | { readonly kind: "pause-resume" }
+  | { readonly kind: "stop-unpin" }
+  | { readonly kind: "start"; readonly activityId: string }
+  | { readonly kind: "pin"; readonly activityId: string };
+
+export type GestureActions = Readonly<Partial<Record<TouchGesture, GestureAction>>>;
 
 /* ---- Workspace data, structurally (SDK models satisfy these; tests and the prototypes pass plain objects) ---- */
 

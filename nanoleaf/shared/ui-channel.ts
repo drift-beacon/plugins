@@ -57,6 +57,12 @@ declare module "@drift-beacon/plugin" {
     preview: { input: PreviewRequest; output: { shown: boolean } };
     /** Try a maximum brightness at once while a slider is dragged; the saved setting is unchanged. */
     brightness: { input: { readonly value: number }; output: { applied: boolean } };
+    /**
+     * This copy is numbering panels (tap to order) or has stopped: while any open copy is, gestures on the wall leave
+     * the workspace alone, since its taps are numbers. Separate from the `draft` preview, which only exists while main
+     * may drive the wall.
+     */
+    numbering: { input: { readonly on: boolean }; output: undefined };
     /** Main's time (epoch ms): the clock a controller's effect runs on (`ControlEffect.startedAt`). */
     clock: { output: { now: number } };
   }
@@ -98,4 +104,10 @@ export const BRIGHTNESS_INPUT: ValueSchema = {
   type: "object",
   properties: { value: { type: "integer", minimum: 1, maximum: 100 } },
   required: ["value"],
+};
+
+export const NUMBERING_INPUT: ValueSchema = {
+  type: "object",
+  properties: { on: { type: "boolean" } },
+  required: ["on"],
 };

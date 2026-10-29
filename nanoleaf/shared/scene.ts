@@ -71,22 +71,42 @@ function ledColor(activity: ActivityLike): Rgb {
  * else the user's newest live span whose activity exists, archived or not, as core's live-activity slot shows it
  * (live, full level); else the first non-archived activity the user pinned (pinned level and style); else off.
  */
+/**
+ * The user's live session the wall shows: their newest live span whose activity exists, archived or not (as core's
+ * live-activity slot shows it). Null when there is none.
+ */
+export function liveFor(
+  userId: string,
+  activities: readonly ActivityLike[],
+  sessions: readonly SessionLike[],
+): { readonly session: SessionLike; readonly activity: ActivityLike } | null {
+  let found: { session: SessionLike; activity: ActivityLike } | null = null;
+  for (const s of sessions) {
+    if (s.status !== "live" || s.type !== "span" || !s.memberIds.includes(userId)) continue;
+    if (found && s.startedAt.getTime() <= found.session.startedAt.getTime()) continue;
+    const activity = activities.find((a) => a.id === s.activityId);
+    if (activity) found = { session: s, activity };
+  }
+  return found;
+}
+
+/**
+ * The user's pin the wall shows: the first non-archived activity they pinned, or null. Core keeps one pin per user
+ * (pinning moves the old one to Next), so "first" only matters if that ever changes: then this is the first in the
+ * app's order, not the newest pin, and what Stop or unpin acts on would need choosing again.
+ */
+export function pinnedFor(userId: string, activities: readonly ActivityLike[]): ActivityLike | null {
+  return activities.find((a) => !a.archived && (a.pinnedBy?.includes(userId) ?? false)) ?? null;
+}
+
 export function decideScene({ userId, activities, sessions, settings, now, control }: SceneInput): Scene {
   if (!settings.enabled) return OFF_SCENE;
   if (control && settings.allowControl) return controlScene(control);
   const at = typeof now === "number" ? now : now.getTime();
 
-  let live: SessionLike | null = null;
-  let liveActivity: ActivityLike | null = null;
-  for (const s of sessions) {
-    if (s.status !== "live" || s.type !== "span" || !s.memberIds.includes(userId)) continue;
-    if (live && s.startedAt.getTime() <= live.startedAt.getTime()) continue;
-    const activity = activities.find((a) => a.id === s.activityId);
-    if (!activity) continue;
-    live = s;
-    liveActivity = activity;
-  }
-  if (live && liveActivity) {
+  const shown = liveFor(userId, activities, sessions);
+  if (shown) {
+    const { session: live, activity: liveActivity } = shown;
     return {
       kind: "live",
       key: `live:${live.id}`,
@@ -100,7 +120,7 @@ export function decideScene({ userId, activities, sessions, settings, now, contr
     };
   }
 
-  const pinned = activities.find((a) => !a.archived && (a.pinnedBy?.includes(userId) ?? false));
+  const pinned = pinnedFor(userId, activities);
   if (pinned) {
     return {
       kind: "pinned",

@@ -252,6 +252,11 @@ export class Director {
     return this.#wall.session?.mode ?? null;
   }
 
+  /** Tap to order holds the wall: its taps number panels, so gestures on the wall leave everything else alone. */
+  get drafting(): boolean {
+    return this.#drafting;
+  }
+
   get scene(): Scene {
     return this.#scene;
   }

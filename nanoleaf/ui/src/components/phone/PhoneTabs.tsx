@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from "motion/react";
 import { type ReactNode, useState } from "react";
 import { useSwapMotion } from "../../hooks/useSwapMotion.ts";
+import { ControlsCard } from "../controls/Controls.tsx";
 import { SettingsCards } from "../SettingsPanel.tsx";
 import { Starfield } from "../Starfield.tsx";
 import { WallSection } from "../wall/WallSection.tsx";
@@ -8,10 +9,10 @@ import { TAB_BAR, TabBar, type TabId } from "./TabBar.tsx";
 import { WallTab } from "./WallTab.tsx";
 
 /**
- * The phone layout (the frame under 768 px, full screen on a phone), once a controller is paired: three tabs over a bar
+ * The phone layout (the frame under 768 px, full screen on a phone), once a controller is paired: four tabs over a bar
  * at the bottom. Wall is the everyday one (the wall small beside what it shows, both brightnesses, the controller);
- * Order has the full drawing with its tools and goal preview, and the order as a compass; Settings has what the wall
- * does in each situation. Notices sit above every tab. In first run the setup is the Wall tab and the others are
+ * Order has the full drawing with its tools and goal preview, and the order as a compass; Controls has what gestures
+ * on the wall do; Settings has what the wall does in each situation. Notices sit above every tab. In first run the setup is the Wall tab and the others are
  * disabled: there's no wall yet to order or set up.
  */
 export function PhoneTabs({ cap, notices, setup }: { cap: number; notices: ReactNode; setup: ReactNode | null }) {
@@ -53,6 +54,7 @@ export function PhoneTabs({ cap, notices, setup }: { cap: number; notices: React
                     </div>
                     {tab === "wall" && <WallTab onOpenWall={() => go("order")} />}
                     {tab === "order" && parts.editor}
+                    {tab === "controls" && <ControlsCard />}
                     {tab === "settings" && (
                       <SettingsCards groups={["pinned", "track", "schedule", "plugins"]} />
                     )}

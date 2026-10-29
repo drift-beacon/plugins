@@ -1,15 +1,16 @@
 import { cn } from "@heroui/theme";
-import { Hexagon, type LucideIcon, Route, SlidersHorizontal } from "lucide-react";
+import { Hexagon, type LucideIcon, Pointer, Route, SlidersHorizontal } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 import { EASE_OUT } from "../../motion.ts";
 
-export type TabId = "wall" | "order" | "settings";
+export type TabId = "wall" | "order" | "controls" | "settings";
 
-export const TABS: readonly TabId[] = ["wall", "order", "settings"];
+export const TABS: readonly TabId[] = ["wall", "order", "controls", "settings"];
 
 const TAB: Record<TabId, { readonly label: string; readonly icon: LucideIcon }> = {
   wall: { label: "Wall", icon: Hexagon },
   order: { label: "Order", icon: Route },
+  controls: { label: "Controls", icon: Pointer },
   settings: { label: "Settings", icon: SlidersHorizontal },
 };
 
@@ -27,7 +28,7 @@ export function TabBar({ value, onChange, only }: { value: TabId; onChange(tab: 
       aria-label="Nanoleaf"
       className="fixed inset-x-0 bottom-0 z-20 border-default-100 border-t bg-background/90 pb-[env(safe-area-inset-bottom)] backdrop-blur"
     >
-      <div className="grid grid-cols-3" style={{ height: TAB_BAR }}>
+      <div className="grid grid-cols-4" style={{ height: TAB_BAR }}>
         {TABS.map((id) => {
           const { label, icon: Icon } = TAB[id];
           const on = id === value;

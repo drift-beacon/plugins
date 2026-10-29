@@ -114,7 +114,7 @@ export type MainPort = Pick<MainApi, "request" | "onMessage" | "onResync">;
 /** What the interface asks of main and hears from it, over the private channel. */
 export type MainChannel = Pick<
   NanoleafModel["actions"],
-  "discover" | "pair" | "forget" | "refresh" | "preview" | "brightness"
+  "discover" | "pair" | "forget" | "refresh" | "preview" | "brightness" | "numbering"
 > &
   Pick<NanoleafModel, "onControllerChanged" | "onResync"> & {
     /** How far main's clock is ahead of this page's (ms), measured with one request. */
@@ -179,6 +179,10 @@ export function createMainChannel(main: MainPort): MainChannel {
     },
     async brightness(value) {
       await main.request("brightness", { value: clampInt(value, 1, 100) }, { timeoutMs: QUICK_TIMEOUT_MS });
+    },
+    async numbering(on) {
+      // Missed, main stops counting this copy when it closes; worse case, a gesture acts while numbering.
+      await main.request("numbering", { on }, { timeoutMs: QUICK_TIMEOUT_MS }).catch(() => undefined);
     },
     async clockOffset() {
       const sentAt = Date.now();
@@ -302,6 +306,7 @@ export function useLiveModel(): NanoleafModel {
       },
       preview: channel.preview,
       brightness: channel.brightness,
+      numbering: channel.numbering,
     }),
     [ctx, self, channel],
   );
