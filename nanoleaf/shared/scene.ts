@@ -91,12 +91,12 @@ export function liveFor(
 }
 
 /**
- * The user's pin the wall shows: the first non-archived activity they pinned, or null. Core keeps one pin per user
+ * The workspace's pin the wall shows: the first non-archived pinned activity, or null. Core keeps one pin per workspace
  * (pinning moves the old one to Next), so "first" only matters if that ever changes: then this is the first in the
  * app's order, not the newest pin, and what Stop or unpin acts on would need choosing again.
  */
-export function pinnedFor(userId: string, activities: readonly ActivityLike[]): ActivityLike | null {
-  return activities.find((a) => !a.archived && (a.pinnedBy?.includes(userId) ?? false)) ?? null;
+export function pinnedFor(activities: readonly ActivityLike[]): ActivityLike | null {
+  return activities.find((a) => !a.archived && a.pinned === true) ?? null;
 }
 
 export function decideScene({ userId, activities, sessions, settings, now, control }: SceneInput): Scene {
@@ -120,7 +120,7 @@ export function decideScene({ userId, activities, sessions, settings, now, contr
     };
   }
 
-  const pinned = pinnedFor(userId, activities);
+  const pinned = pinnedFor(activities);
   if (pinned) {
     return {
       kind: "pinned",

@@ -45,7 +45,7 @@ export const ACTIVITIES: readonly ActivityLike[] = [
     archived: false,
     goal: { type: "duration", seconds: 2 * 3600 },
     period: "day",
-    pinnedBy: [],
+    pinned: false,
   },
   {
     id: "guitar",
@@ -56,7 +56,7 @@ export const ACTIVITIES: readonly ActivityLike[] = [
     archived: false,
     goal: { type: "duration", seconds: 3 * 3600 },
     period: "week",
-    pinnedBy: [],
+    pinned: false,
   },
   {
     id: "spanish",
@@ -67,7 +67,7 @@ export const ACTIVITIES: readonly ActivityLike[] = [
     archived: false,
     goal: { type: "duration", seconds: 20 * 60 },
     period: "day",
-    pinnedBy: [],
+    pinned: false,
   },
   {
     id: "gym",
@@ -78,7 +78,7 @@ export const ACTIVITIES: readonly ActivityLike[] = [
     archived: false,
     goal: { type: "count", count: 4 },
     period: "week",
-    pinnedBy: [SAM],
+    pinned: false,
   },
   {
     id: "plants",
@@ -89,7 +89,7 @@ export const ACTIVITIES: readonly ActivityLike[] = [
     archived: false,
     goal: { type: "count", count: 3 },
     period: "week",
-    pinnedBy: [],
+    pinned: false,
   },
   {
     id: "meditation",
@@ -100,7 +100,7 @@ export const ACTIVITIES: readonly ActivityLike[] = [
     archived: false,
     goal: { type: "duration", seconds: 10 * 60 },
     period: "day",
-    pinnedBy: [],
+    pinned: false,
   },
   {
     id: "reading",
@@ -111,7 +111,7 @@ export const ACTIVITIES: readonly ActivityLike[] = [
     archived: false,
     goal: null,
     period: null,
-    pinnedBy: [],
+    pinned: false,
   },
   {
     id: "walk",
@@ -122,7 +122,7 @@ export const ACTIVITIES: readonly ActivityLike[] = [
     archived: false,
     goal: null,
     period: null,
-    pinnedBy: [],
+    pinned: false,
   },
   {
     id: "vitamins",
@@ -133,7 +133,7 @@ export const ACTIVITIES: readonly ActivityLike[] = [
     archived: false,
     goal: null,
     period: null,
-    pinnedBy: [],
+    pinned: false,
   },
   {
     id: "landlord",
@@ -144,7 +144,7 @@ export const ACTIVITIES: readonly ActivityLike[] = [
     archived: false,
     goal: null,
     period: null,
-    pinnedBy: [],
+    pinned: false,
   },
   {
     id: "old-project",
@@ -155,7 +155,7 @@ export const ACTIVITIES: readonly ActivityLike[] = [
     archived: true,
     goal: { type: "duration", seconds: 3600 },
     period: "day",
-    pinnedBy: [ME],
+    pinned: false,
   },
 ];
 
@@ -166,7 +166,7 @@ export const PLAIN_ACTIVITY = "reading";
 /** How a prototype variant opens. */
 export type StartState = "live-goal" | "near-goal" | "live" | "pinned" | "idle";
 
-/** Which activity the user has pinned in each starting state (a pin can exist under a live session). */
+/** Which activity the workspace has pinned in each starting state (a pin can exist under a live session). */
 const PINNED: Record<StartState, string | null> = {
   "live-goal": "spanish",
   "near-goal": null,
@@ -175,10 +175,10 @@ const PINNED: Record<StartState, string | null> = {
   idle: null,
 };
 
-/** The activities for a starting state: the fixtures with the user's pin applied. */
+/** The activities for a starting state: the fixtures with the workspace's pin applied. */
 export function activitiesFor(start: StartState): ActivityLike[] {
   const pinned = PINNED[start];
-  return ACTIVITIES.map((a) => (a.id === pinned ? { ...a, pinnedBy: [...(a.pinnedBy ?? []), ME] } : { ...a }));
+  return ACTIVITIES.map((a) => ({ ...a, pinned: a.id === pinned }));
 }
 
 const MIN = 60_000;

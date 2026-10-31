@@ -17,7 +17,7 @@ function activity(id, extra = {}) {
     archived: false,
     goal: null,
     period: "day",
-    pinnedBy: [],
+    pinned: false,
     ...extra,
   };
 }
@@ -33,7 +33,7 @@ const STOP = { kind: "stop-unpin" };
 
 test("the adaptive actions act on the live session, else on the pin, else do nothing", () => {
   const work = activity("work");
-  const guitar = activity("guitar", { pinnedBy: [ME] });
+  const guitar = activity("guitar", { pinned: true });
   const session = live("s1", "work", new Date(1000));
 
   assert.deepEqual(resolveGesture(PAUSE, ME, [work, guitar], [session]), {
@@ -53,15 +53,15 @@ test("the adaptive actions act on the live session, else on the pin, else do not
   assert.equal(resolveGesture(undefined, ME, [work, guitar], [session]), null);
 });
 
-test("the adaptive actions pick what the wall shows: the newest live span of mine, and only my pin", () => {
+test("the adaptive actions pick what the wall shows: the newest live span of mine, and the workspace's pin", () => {
   const a = activity("a");
-  const b = activity("b", { pinnedBy: [THEM] });
+  const b = activity("b", { pinned: true });
   const older = live("old", "a", new Date(1000));
   const newer = live("new", "b", new Date(2000));
   const theirs = live("theirs", "a", new Date(3000), [THEM]);
   assert.equal(resolveGesture(STOP, ME, [a, b], [older, newer, theirs])?.sessionId, "new");
-  assert.equal(resolveGesture(STOP, ME, [a, b], []), null, "someone else's pin is not mine to unpin");
-  const archivedPin = activity("c", { archived: true, pinnedBy: [ME] });
+  assert.deepEqual(resolveGesture(STOP, ME, [a, b], []), { kind: "unpin", activityId: "b" }, "the workspace's pin is everyone's to unpin");
+  const archivedPin = activity("c", { archived: true, pinned: true });
   assert.equal(resolveGesture(PAUSE, ME, [archivedPin], []), null, "an archived pin doesn't show");
 });
 
@@ -85,7 +85,7 @@ test("start and pin act on the chosen activity whatever is going on, unless ther
     kind: "pin",
     activityId: "reading",
   });
-  const pinned = activity("reading", { pinnedBy: [ME] });
+  const pinned = activity("reading", { pinned: true });
   assert.equal(resolveGesture({ kind: "pin", activityId: "reading" }, ME, [pinned], []), null, "already pinned");
   assert.equal(resolveGesture({ kind: "start", activityId: "gone" }, ME, [work], []), null);
   const archived = activity("old", { archived: true });
@@ -187,7 +187,7 @@ test("main leaves the workspace alone while gestures are off or tap to order hol
 });
 
 test("main does one gesture at a time: one that arrives meanwhile is dropped", async () => {
-  const guitar = activity("guitar", { pinnedBy: [ME] });
+  const guitar = activity("guitar", { pinned: true });
   let finish;
   const h = harness({
     activities: [guitar],
@@ -209,7 +209,7 @@ test("main does one gesture at a time: one that arrives meanwhile is dropped", a
 });
 
 test("main says a point activity was marked done, not started", async () => {
-  const vitamins = activity("vitamins", { name: "Take vitamins", trackingType: "point", pinnedBy: [ME] });
+  const vitamins = activity("vitamins", { name: "Take vitamins", trackingType: "point", pinned: true });
   const h = harness({ activities: [vitamins] });
   await h.onGesture("double-tap");
   assert.deepEqual(h.calls, [["track", "vitamins"]]);
@@ -217,7 +217,7 @@ test("main says a point activity was marked done, not started", async () => {
 });
 
 test("main logs an action the app refuses, and keeps going", async () => {
-  const guitar = activity("guitar", { pinnedBy: [ME] });
+  const guitar = activity("guitar", { pinned: true });
   const h = harness({ activities: [guitar], act: () => Promise.reject(new Error("nope")) });
   await h.onGesture("swipe-down");
   assert.equal(h.logs.length, 1);
@@ -228,7 +228,7 @@ test("main logs an action the app refuses, and keeps going", async () => {
 });
 
 test("a gesture after gestures were switched off, or tap to order began, mid-action does nothing", async () => {
-  const guitar = activity("guitar", { pinnedBy: [ME] });
+  const guitar = activity("guitar", { pinned: true });
   let finish;
   const h = harness({
     activities: [guitar],
@@ -262,7 +262,7 @@ test("a failure before any action, reading what's going on, is logged and never 
     h.logs.map(([level, message]) => [level, message]),
     [["warn", "double-tap: couldn't act on it"]],
   );
-  h.state.data = () => ({ activities: [activity("g", { pinnedBy: [ME] })], sessions: [] });
+  h.state.data = () => ({ activities: [activity("g", { pinned: true })], sessions: [] });
   await h.onGesture("double-tap");
   assert.deepEqual(h.calls, [["track", "g"]], "not left busy");
 });

@@ -49,14 +49,14 @@ export function resolveGesture(
       const at = { sessionId: live.session.id, activityId: live.activity.id };
       return { kind: action.kind === "pause-resume" ? "pause" : "stop", ...at };
     }
-    const pinned = pinnedFor(userId, activities);
+    const pinned = pinnedFor(activities);
     if (!pinned) return null;
     return { kind: action.kind === "pause-resume" ? "track" : "unpin", activityId: pinned.id };
   }
   const activity = activities.find((a) => a.id === action.activityId);
   if (!activity || activity.archived) return null;
   if (action.kind === "pin") {
-    return activity.pinnedBy?.includes(userId) ? null : { kind: "pin", activityId: activity.id };
+    return activity.pinned ? null : { kind: "pin", activityId: activity.id };
   }
   // A span already live for the user would only start a second one.
   const live = sessions.some(

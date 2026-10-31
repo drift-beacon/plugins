@@ -162,9 +162,9 @@ function initialState(layoutKey: LayoutKey | null, options: SimOptions, now: num
   };
 }
 
-/** The rows an older app sends: no goal, period or pinnedBy at all. */
+/** The rows an older app sends: no goal, period or pinned at all. */
 function withoutGoals(activities: readonly ActivityLike[]): ActivityLike[] {
-  return activities.map(({ goal: _goal, period: _period, pinnedBy: _pinnedBy, ...rest }) => rest);
+  return activities.map(({ goal: _goal, period: _period, pinned: _pinned, ...rest }) => rest);
 }
 
 const round3 = (n: number) => Math.round(n * 1000) / 1000;
@@ -546,14 +546,10 @@ export function useSimModel(layoutKey: LayoutKey | null, options: SimOptions): N
         case "pin":
           // Pins on archived activities stay as they are: the wall ignores them anyway.
           update((x) => {
-            const pinned = x.activities.some((a) => !a.archived && a.pinnedBy?.includes(ME));
+            const pinned = x.activities.some((a) => !a.archived && a.pinned === true);
             return {
               ...x,
-              activities: x.activities.map((a) => {
-                if (a.archived) return a;
-                const others = (a.pinnedBy ?? []).filter((id) => id !== ME);
-                return { ...a, pinnedBy: !pinned && a.id === "guitar" ? [...others, ME] : others };
-              }),
+              activities: x.activities.map((a) => (a.archived ? a : { ...a, pinned: !pinned && a.id === "guitar" })),
             };
           });
           break;

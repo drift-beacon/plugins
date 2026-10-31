@@ -5,7 +5,7 @@ const channel = 'drift-beacon-plugin';
 const frame = document.querySelector('iframe')!;
 const folder = 'M10 4H2V20H22V6H12Z';
 const categories = [{id:'work',name:'Work',color:'#38bdf8'}, {id:'creative',name:'Creative',color:'#c084fc'}].map((c,i)=>({...c,sortOrder:i,description:null,icon:'folder',iconPath:folder}));
-const activities = [{id:'tax',name:'Tax return',categoryId:'work',trackingType:'span'}, {id:'write',name:'Write proposal',categoryId:'work',trackingType:'span'}, {id:'guitar',name:'Guitar',categoryId:'creative',trackingType:'span'}, {id:'water',name:'Water plants',categoryId:null,trackingType:'point'}].map((a,i)=>({...a,sortOrder:i,description:null,icon:'folder',iconPath:folder,color:categories.find(c=>c.id===a.categoryId)?.color??'#fbbf24',archived:false,unit:null,goal:null,period:null,pinnedBy:[]}));
+const activities = [{id:'tax',name:'Tax return',categoryId:'work',trackingType:'span'}, {id:'write',name:'Write proposal',categoryId:'work',trackingType:'span'}, {id:'guitar',name:'Guitar',categoryId:'creative',trackingType:'span'}, {id:'water',name:'Water plants',categoryId:null,trackingType:'point'}].map((a,i)=>({...a,sortOrder:i,description:null,icon:'folder',iconPath:folder,color:categories.find(c=>c.id===a.categoryId)?.color??'#fbbf24',archived:false,unit:null,goal:null,period:null,pinned:false,placedBy:null}));
 let sessions: Array<{id:string;activityId:string;type:string;status:string;memberIds:string[];startedAt:string;endedAt:null}> = [];
 const duel=blankSetup('duel'); duel.duel={should:{type:'activity',id:'tax'},feel:{type:'category',id:'creative'}};
 const now=new Date().toISOString();

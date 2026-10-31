@@ -2,8 +2,8 @@
   "id": "nanoleaf",
   "name": "Nanoleaf",
   "icon": "icon.png",
-  "version": "0.5.0",
-  "apiVersion": "0.2",
+  "version": "0.6.0",
+  "apiVersion": "0.3",
   "description": "Glow Nanoleaf Shapes in the colour of your live activity and fill them as you close in on its goal",
   "author": {
     "name": "@rshallam"

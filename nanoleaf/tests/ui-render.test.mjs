@@ -120,7 +120,7 @@ const DEEP_WORK = {
   goal: { type: "duration", seconds: 7200 },
   // All time, not a day: a day's start depends on the machine's time zone.
   period: null,
-  pinnedBy: [],
+  pinned: false,
 };
 const LIVE_SESSION = {
   id: "s1",

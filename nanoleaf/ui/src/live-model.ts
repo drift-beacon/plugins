@@ -228,9 +228,9 @@ export function useLiveModel(): NanoleafModel {
   const sessionList = ctx.sessions.list();
   const activities = useMemo(() => activityList.map((a) => a.data as ActivityLike), [activityList]);
   const sessions = useMemo(() => sessionList.map((s): SessionLike => s.data), [sessionList]);
-  // An app on SDK 0.2.2 sends `pinnedBy` on every row; with no activities yet there is nothing to tell, so no notice.
+  // An app on SDK 0.3 sends `pinned` on every row; with no activities yet there is nothing to tell, so no notice.
   const supportsGoals = useMemo(
-    () => activityList.length === 0 || activityList.some((a) => Array.isArray((a.data as ActivityLike).pinnedBy)),
+    () => activityList.length === 0 || activityList.some((a) => typeof (a.data as ActivityLike).pinned === "boolean"),
     [activityList],
   );
 

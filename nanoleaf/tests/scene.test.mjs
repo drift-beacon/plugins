@@ -29,7 +29,7 @@ function activity(id, extra = {}) {
     archived: false,
     goal: null,
     period: "day",
-    pinnedBy: [],
+    pinned: false,
     ...extra,
   };
 }
@@ -69,7 +69,7 @@ test("nothing live or pinned gives off", () => {
 
 test("live beats pinned, at full level with the activity's LED colour and goal progress", () => {
   const activities = [
-    activity("pin", { pinnedBy: [ME] }),
+    activity("pin", { pinned: true }),
     activity("a", { color: "rgb(0 0 128)", goal: { type: "duration", seconds: 3600 } }),
   ];
   const sessions = [live("s1", "a", new Date(2026, 8, 30, 9, 30))];
@@ -111,12 +111,12 @@ test("a shared live session I'm a member of counts; points and completed session
   assert.equal(scene({ activities, sessions: [completed] }), OFF_SCENE);
 });
 
-test("pinned: the first non-archived pin of mine, at the pinned level and style", () => {
+test("pinned: the first non-archived pin of the workspace, at the pinned level and style", () => {
   const activities = [
-    activity("archived", { archived: true, pinnedBy: [ME] }),
-    activity("theirs", { pinnedBy: [THEM] }),
-    activity("mine", { pinnedBy: [THEM, ME], color: "gold", goal: { type: "count", count: 4 } }),
-    activity("second", { pinnedBy: [ME] }),
+    activity("archived", { archived: true, pinned: true }),
+    activity("unpinned"),
+    activity("mine", { pinned: true, color: "gold", goal: { type: "count", count: 4 } }),
+    activity("second", { pinned: true }),
   ];
   const sessions = [{
     id: "done",
@@ -148,8 +148,8 @@ test("pinned: the first non-archived pin of mine, at the pinned level and style"
 test("an archived activity's live session still glows (as core's live slot shows it); its pin is ignored", () => {
   const goal = { type: "duration", seconds: 3600 };
   const activities = [
-    activity("old", { archived: true, pinnedBy: [ME], color: "#ff0000", goal }),
-    activity("pin", { pinnedBy: [ME] }),
+    activity("old", { archived: true, pinned: true, color: "#ff0000", goal }),
+    activity("pin", { pinned: true }),
   ];
   const sessions = [live("s1", "old", new Date(2026, 8, 30, 9, 30))];
   const result = scene({ activities, sessions });
@@ -166,7 +166,7 @@ test("an archived activity's live session still glows (as core's live slot shows
 test("pinnedProgress off drops the pinned scene's progress, but not a live one's", () => {
   const goal = { type: "duration", seconds: 3600 };
   const settings = { ...SETTINGS, pinnedProgress: false };
-  const pinned = [activity("a", { pinnedBy: [ME], goal })];
+  const pinned = [activity("a", { pinned: true, goal })];
   assert.equal(scene({ activities: pinned, settings }).progress, null);
   const sessions = [live("s1", "a", new Date(2026, 8, 30, 9, 30))];
   assert.equal(scene({ activities: pinned, sessions, settings }).progress.fraction, 0.5);

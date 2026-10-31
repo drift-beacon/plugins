@@ -214,8 +214,9 @@ export type ActivityGoal =
 export type GoalPeriod = "day" | "week" | "month" | "year";
 
 /**
- * What the plugin reads of an activity. `goal`, `period` and `pinnedBy` arrived in SDK 0.2.2: an older Drift Beacon
- * sends none of them, so they are optional here and absent means "no goal, all history, not pinned".
+ * What the plugin reads of an activity. `goal` and `period` arrived in SDK 0.2.2 and `pinned` (the workspace's pin)
+ * in 0.3.0: an older Drift Beacon sends none of them, so they are optional here and absent means "no goal, all history,
+ * not pinned".
  */
 export interface ActivityLike {
   readonly id: string;
@@ -226,7 +227,7 @@ export interface ActivityLike {
   readonly archived: boolean;
   readonly goal?: ActivityGoal | null;
   readonly period?: GoalPeriod | null;
-  readonly pinnedBy?: readonly string[];
+  readonly pinned?: boolean;
 }
 
 export interface SessionLike {

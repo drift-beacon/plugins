@@ -558,7 +558,7 @@ const ORANGE = {
   archived: false,
   goal: { type: "duration", seconds: 3600 },
   period: "day",
-  pinnedBy: ["me"],
+  pinned: true,
 };
 const span = (id, status, from, to) => ({
   id,

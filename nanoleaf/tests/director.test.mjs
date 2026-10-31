@@ -217,7 +217,7 @@ const activity = (id, color, extra = {}) => ({
   archived: false,
   goal: null,
   period: null,
-  pinnedBy: [],
+  pinned: false,
   ...extra,
 });
 
@@ -318,7 +318,7 @@ function endLive(env, id = "s1") {
 }
 
 function pin(env, activityId) {
-  env.data.activities = env.data.activities.map((a) => (a.id === activityId ? { ...a, pinnedBy: [USER] } : a));
+  env.data.activities = env.data.activities.map((a) => (a.id === activityId ? { ...a, pinned: true } : a));
   env.director.update();
 }
 
@@ -822,7 +822,7 @@ test("a frame the stream drops (a name still resolving) goes out on the next tic
 });
 
 test("a pinned pulse changes every tick, so every tick sends", async () => {
-  const env = setup({ activities: [activity("a1", PURPLE, { pinnedBy: [USER] })] });
+  const env = setup({ activities: [activity("a1", PURPLE, { pinned: true })] });
   await connect(env);
   assert.equal(env.director.scene.kind, "pinned");
   await env.clock.advance(3000);
@@ -1222,7 +1222,7 @@ test("a change inside the takeover's echo window is read again when the window e
 });
 
 test("static fallback yields at once to someone else's effect, even while an animated scene keeps writing", async () => {
-  const env = setup({ activities: [activity("a1", PURPLE, { pinnedBy: [USER] })] });
+  const env = setup({ activities: [activity("a1", PURPLE, { pinned: true })] });
   env.device.fail.enterExtControl = new NanoleafError("rejected", "not supported", 400);
   await connect(env);
   assert.equal(env.director.controlMode, "static");
@@ -1660,7 +1660,7 @@ test("brightness overrides are throttled to one write per 150 ms and the last va
 
 test("a pin drives the wall at its own brightness; a preview over it, and a session, at Session brightness", async () => {
   const env = setup({
-    activities: [activity("a1", PURPLE, { pinnedBy: [USER] }), activity("a2", "#10b981")],
+    activities: [activity("a1", PURPLE, { pinned: true }), activity("a2", "#10b981")],
     settings: { maxBrightness: 80, pinnedBrightness: 20 },
   });
   await connect(env);

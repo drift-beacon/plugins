@@ -31,7 +31,7 @@ This file is the contract the code follows. `shared/types.ts` holds the types; t
 | Partial fill | Intensity on the one colour zone each Shapes panel has. The level is sent as it is (no 2.2 gamma: the controller most likely maps RGB perceptually itself, nanoleaf-api.md §11), lifted so any lit panel is at least 3% (8/255), and rounded so a dim panel keeps its hue. The drawing uses the same mapping as opacity. |
 | Whose sessions | The user's own live span (`memberIds` includes them), newest first. Otherwise the activity they have pinned. Otherwise nothing. This mirrors `live-activity-slot.ts` in core. |
 | Progress maths | Mirrors the app (`packages/domain`). The period starts at local midnight / Sunday / the 1st / Jan 1. Completed sessions of all members are summed, plus the user's own live elapsed time. A span activity whose goal is a count counts sessions (what the goal editor promises), not duration. |
-| Goals, periods and pins in the SDK | SDK 0.2.2 adds `goal`, `period` and `pinnedBy` to `ActivityData`, plus `Activity.isPinned`. The change is additive; with an older app the plugin still glows but shows no goal and no pin. |
+| Goals, periods and pins in the SDK | SDK 0.2.2 adds `goal` and `period` to `ActivityData`; SDK 0.3.0 makes the pin the workspace's, `pinned` (and `placedBy`), read by `Activity.isPinned`. With an app that sends none of them the plugin still glows but shows no goal and no pin. |
 | When nothing is live or pinned | A setting: hand the wall back to the scene it had before (default), or turn it off. |
 | Someone else changes the wall | The plugin yields until something different should show, or until the user presses "Take it back". It does not fight the Nanoleaf app, HomeKit or Home Assistant. |
 | Two users or workspaces, one controller | The first instance to drive the controller wins, through a module-level claim (all instances of a plugin share one host process). The others show `busy`. |
@@ -285,7 +285,7 @@ This handles offset joins such as a mini triangle against half of a triangle's e
    - `key = "live:" + session.id`, `level = 1`, `style = "glow"`, `track = settings.track`.
    - `progress = goalProgress(...)`.
    - `rgb = toLedRgb(parseColor(color) ?? WARM_WHITE)`, `cssColor = activity.color`.
-3. **Pinned.** Otherwise use the first non-archived activity whose `pinnedBy` includes `userId`.
+3. **Pinned.** Otherwise use the first non-archived activity the workspace has pinned (`pinned`). The pin is every member's, so any of them can unpin it from the wall.
    - `key = "pinned:" + id`, `level = 1` (main dims a pin with the wall's brightness, `pinnedBrightness`), `style = pinnedStyle`.
    - `progress = pinnedProgress ? goalProgress(...) : null`.
    - Otherwise the result is `OFF_SCENE`.
@@ -667,7 +667,7 @@ export interface NanoleafModel {
   /** The platform's status, plus `connecting` while the page hasn't heard main's real status yet. */
   readonly mainStatus: "connecting" | "running" | "starting" | "unavailable" | "disabled" | "incompatible" | "not-installed";
   readonly mainStatusReason: string | null;
-  /** The app sends goals and pins (SDK 0.2.2): some activity row has a `pinnedBy` array, or there are no activities. */
+  /** The app sends goals and pins (SDK 0.3): some activity row has a boolean `pinned`, or there are no activities. */
   readonly supportsGoals: boolean;
   readonly actions: {
     /** Applies locally at once; rejects (the SDK rolls back) when the app refuses. The model logs a refusal, so
@@ -868,7 +868,7 @@ export interface NanoleafModel {
 `ActivityData` gains, all optional (`undefined` = the app predates them, which is how a plugin detects it):
 - `goal?: ActivityGoal | null`. Points always use `count`. Spans use `spanTargetType`.
 - `period?: GoalPeriod | null`. Null when progress is disabled.
-- `pinnedBy?: readonly string[]`.
+- `pinnedBy?: readonly string[]` (replaced in 0.3.0 by the workspace's pin, `pinned` and `placedBy`).
 
 The internal wire row keeps them required (`ActivityRow = Required<ActivityData>`), so the app's projection must send them.
 

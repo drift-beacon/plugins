@@ -176,7 +176,7 @@ export function useSettingsGroups(): Record<SettingsGroup, ReactNode> & { readon
   };
 
   // Previews use the pinned activity's colour when there is one, else whatever is showing.
-  const pinned = model.activities.find((a) => !a.archived && a.pinnedBy?.includes(model.userId));
+  const pinned = model.activities.find((a) => !a.archived && a.pinned === true);
   const color = pinned?.color ?? scene.cssColor ?? "#a78bfa";
   const pinnedCss = pinned?.color ?? null;
   const pinnedRgb = useMemo(() => (pinnedCss ? toLedRgb(parseColor(pinnedCss) ?? WARM_WHITE) : null), [pinnedCss]);
