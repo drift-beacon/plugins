@@ -26,7 +26,14 @@ export interface CategoryView {
   readonly iconPath: string | null;
 }
 
-/** One of the current user's live sessions. */
+/** A member of the workspace, as the "Tracks for" row draws them. */
+export interface MemberView {
+  readonly id: string;
+  readonly name: string;
+  readonly role: "OWNER" | "MEMBER";
+}
+
+/** One of the workspace's live sessions. */
 export interface LiveSession {
   readonly id: string;
   readonly activityId: string;

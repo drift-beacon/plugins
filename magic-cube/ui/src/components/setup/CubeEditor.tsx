@@ -4,7 +4,7 @@ import { useEffect,useRef } from "react";
 import { Cube3D } from "./cube/Cube3D";
 import { useCubeEditor } from "./editor";
 import { FaceEditor } from "./face-editor";
-import { LightsToggle,ModeEditor,PinTrackSwitch } from "./kit";
+import { LightsToggle,ModeEditor,PinTrackSwitch,RollsFor } from "./kit";
 import { resultFor,useMediaQuery } from "./live";
 import { LiveOverlay } from "./LiveOverlay";
 import { type Workspace,isReady } from "./model";
@@ -42,6 +42,7 @@ export function CubeEditor({ ws }: { ws: Workspace }) {
           </motion.h2>
         </AnimatePresence>
         <div className="flex shrink-0 items-center gap-2">
+          <RollsFor members={ws.members} chosen={ws.rollsFor} onToggle={ws.toggleRollsFor} />
           <LightsToggle ws={ws} />
           <PinTrackSwitch ws={ws} className="shrink-0" />
         </div>

@@ -559,6 +559,8 @@ const ORANGE = {
   goal: { type: "duration", seconds: 3600 },
   period: "day",
   pinned: true,
+  placedBy: "me",
+  progress: { type: "duration", seconds: 0 },
 };
 const span = (id, status, from, to) => ({
   id,
@@ -566,13 +568,14 @@ const span = (id, status, from, to) => ({
   type: "span",
   status,
   memberIds: ["me"],
+  currentMemberIds: status === "live" ? ["me"] : [],
   startedAt: new Date(NOW - from * 60000),
   endedAt: to === null ? null : new Date(NOW - to * 60000),
 });
 
 /** Wall colours for `sessions` under `settings`: decideScene, renderFrame, then deviceRgb, as main sends them. */
-function wall(sessions, settings, t, order = [1, 2, 3, 4, 5]) {
-  const scene = decideScene({ userId: "me", activities: [ORANGE], sessions, settings, now: NOW });
+function wall(sessions, settings, t, order = [1, 2, 3, 4, 5], activity = ORANGE) {
+  const scene = decideScene({ activities: [activity], sessions, following: ["me"], settings, now: NOW });
   const frame = renderFrame(initialRenderState(scene, NOW), order, t);
   return order.map((id) => deviceRgb(frame.get(id)));
 }
@@ -598,17 +601,19 @@ test("35% of a 5-panel goal on the wall: full, three quarters, then a faint trac
 });
 
 test("the default pinned glow and pulse stay visible on the wall, track and trough included, in the colour", () => {
-  const done = [span("s0", "completed", 60, 39)];
+  // 21 minutes done today, as Drift Beacon counts it.
+  const done = [];
+  const practised = { ...ORANGE, progress: { type: "duration", seconds: 21 * 60 } };
   // Goal progress on, so the track shows (it's off by default: a pin then lights the whole wall).
   const SETTINGS = { ...DEFAULT_SETTINGS, pinnedProgress: true };
-  const glow = wall(done, { ...SETTINGS, pinnedStyle: "glow" }, NOW);
+  const glow = wall(done, { ...SETTINGS, pinnedStyle: "glow" }, NOW, undefined, practised);
   // At full level: the wall's brightness dims a pin (main drives it at `pinnedBrightness`), not its frames.
   assert.deepEqual(glow, [[255, 118, 23], [198, 92, 18], [27, 12, 2], [27, 12, 2], [27, 12, 2]]);
   // The pulse at the wall's 10 Hz over a period: every panel lit and orange all the way down to its trough.
   let trough = 255;
   const seen = new Set();
   for (let t = NOW; t < NOW + PULSE_MS; t += 100) {
-    const frame = wall(done, SETTINGS, t);
+    const frame = wall(done, SETTINGS, t, undefined, practised);
     for (const rgb of frame) {
       assert.ok(orangeOn(rgb), `${rgb} at ${t - NOW}`);
       trough = Math.min(trough, rgb[0]);

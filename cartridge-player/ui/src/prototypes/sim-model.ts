@@ -4,6 +4,7 @@
 // second implementation of main's rules, kept in step by hand: each function below names the one in main/src
 // (player.ts, policy.ts, record.ts) it stands in for.
 import { PluginError } from "@drift-beacon/plugin/ui";
+import { actingFor } from "../../../shared/acting-for.ts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { PresenceState } from "../../../shared/state.ts";
 import { type CartridgeStats, LIMITS, type HistoryEntry, NO_STATS, type PlayerRecord, type Slot } from "../../../shared/storage.ts";
@@ -11,8 +12,19 @@ import { type LabelResult, SAVE_REFUSED, type StartResult } from "../../../share
 import type { PlayerModel } from "../model.ts";
 import type { MainStatus } from "../view/main-status.ts";
 import { beatResolved, type ReadingBeat } from "../view/phase.ts";
-import { type ActivityView, byId, type LiveSession } from "../view/types.ts";
-import { ACTIVITIES, API_PATH, BLANK_TAGS, CATEGORIES, DEVICE, KNOWN_TAGS, simStart, type StartState } from "./sim-fixtures.ts";
+import { type ActivityView, byId, type LiveSession, type MemberView } from "../view/types.ts";
+import {
+  ACTIVITIES,
+  API_PATH,
+  BLANK_TAGS,
+  CATEGORIES,
+  DEVICE,
+  KNOWN_TAGS,
+  MEMBERS,
+  simStart,
+  type StartState,
+  VIEWER,
+} from "./sim-fixtures.ts";
 
 /** How long main takes to resolve a cartridge after posting `reading`. */
 const RESOLVE_MS = 450;
@@ -42,6 +54,7 @@ export type SimEvent =
   | { readonly type: "fail-save" }
   | { readonly type: "fail-start" }
   | { readonly type: "late-beat" }
+  | { readonly type: "solo" }
   | { readonly type: "reset" };
 
 const EVENT = "cartridge-sim";
@@ -62,6 +75,7 @@ export interface SimReadout {
   readonly failSave: boolean;
   readonly failStart: boolean;
   readonly lateBeat: boolean;
+  readonly members: number;
 }
 
 /** Listens for the simulator's readout. */
@@ -77,11 +91,18 @@ interface EndedSession {
   readonly endedAt: number;
 }
 
+/** A live session, with the members who started it first and anyone who joined after (seat order). */
+interface SimSession extends LiveSession {
+  readonly members: readonly string[];
+}
+
 interface Sim {
   readonly activities: ActivityView[];
   readonly mappings: Record<string, string>;
   readonly record: PlayerRecord;
-  readonly live: LiveSession[];
+  readonly live: SimSession[];
+  /** The workspace's members: three, or the owner alone. */
+  readonly members: readonly MemberView[];
   readonly ended: Readonly<Record<string, EndedSession>>;
   readonly online: boolean;
   /**
@@ -116,6 +137,7 @@ function initial(start: StartState): Sim {
     mappings: s.mappings,
     record: s.record,
     live: s.live,
+    members: MEMBERS,
     ended: {},
     online: true,
     waiting: false,
@@ -194,15 +216,35 @@ function endSession(sim: Sim, sessionId: string | null, now: number): Sim {
   };
 }
 
+/** main/src/player.ts `membersOf`: whom a cartridge tracks for now. */
+const membersOf = (sim: Sim, tag: string): string[] =>
+  actingFor(Object.hasOwn(sim.record.cartridges, tag) ? sim.record.cartridges[tag].members : undefined, sim.members);
+
+/**
+ * main/src/policy.ts `lateSession`: the newest live span of the activity started since the cartridge went in, with the
+ * members the refused start named in its first seats.
+ */
+function lateSession(sim: Sim, slot: Slot): string | null {
+  const { lateFor, activityId } = slot;
+  if (lateFor === null || lateFor.length === 0) return null;
+  const late = [...sim.live]
+    .sort((a, b) => b.startedAt - a.startedAt)
+    .find(
+      (live) =>
+        live.activityId === activityId &&
+        live.startedAt >= Date.parse(slot.since) &&
+        lateFor.every((id) => live.members.slice(0, lateFor.length).includes(id)),
+    );
+  return late?.id ?? null;
+}
+
 /** Main's eject: end the session the cartridge started, if live; count its time; history. */
 function eject(before: Sim, now: number): Sim {
   let slot = slotOf(before);
   if (!slot) return before;
-  if (slot.outcome === "error" && slot.sessionId === null && slot.activityId !== null) {
-    // A start that was rejected may still have run: the activity's live session is this cartridge's to end.
-    const { activityId } = slot;
-    const ran = before.live.find((live) => live.activityId === activityId);
-    if (ran) slot = { ...slot, sessionId: ran.id };
+  if (slot.outcome === "error" && slot.sessionId === null) {
+    // A start that was rejected may still have run: a session it started is this cartridge's to end.
+    slot = { ...slot, sessionId: lateSession(before, slot) };
   }
   const sim = endSession(before, slot.sessionId, now);
   const durationMs = playedMs(sim, slot, now);
@@ -219,16 +261,28 @@ interface Tracked {
   readonly sessionId: string | null;
   readonly result: StartResult["result"] | "error";
   readonly error: string | null;
+  /** `Slot.lateFor`: the members a refused start named, since the app's refusal may still have run. */
+  readonly lateFor: readonly string[] | null;
 }
 
-/** Main's `perform`: mark a point, adopt a live session of the activity, or start one; a rejected action is `error`. */
-function track(sim: Sim, activity: ActivityView, now: number): Tracked {
-  const adopted = activity.point ? undefined : sim.live.find((live) => live.activityId === activity.id);
-  if (adopted) return { sim, sessionId: adopted.id, result: "resumed", error: null };
-  if (sim.failStart) return { sim: { ...sim, failStart: false }, sessionId: null, result: "error", error: ACTION_ERROR.message };
-  if (activity.point) return { sim, sessionId: `s-${++sessionCounter}`, result: "marked", error: null };
-  const session = { id: `s-${++sessionCounter}`, activityId: activity.id, startedAt: now };
-  return { sim: { ...sim, live: [...sim.live, session] }, sessionId: session.id, result: "started", error: null };
+/**
+ * Main's `resolveCartridge` and `perform`, for `members`: mark a point, adopt a live span of the activity they are
+ * all in, or start one for them; a rejected action is `error`.
+ */
+function track(sim: Sim, activity: ActivityView, members: readonly string[], now: number): Tracked {
+  const adopted = activity.point
+    ? undefined
+    : [...sim.live]
+        .sort((a, b) => b.startedAt - a.startedAt)
+        .find((live) => live.activityId === activity.id && members.every((id) => live.members.includes(id)));
+  if (adopted) return { sim, sessionId: adopted.id, result: "resumed", error: null, lateFor: null };
+  if (sim.failStart) {
+    const lateFor = activity.point ? null : members;
+    return { sim: { ...sim, failStart: false }, sessionId: null, result: "error", error: ACTION_ERROR.message, lateFor };
+  }
+  if (activity.point) return { sim, sessionId: `s-${++sessionCounter}`, result: "marked", error: null, lateFor: null };
+  const session: SimSession = { id: `s-${++sessionCounter}`, activityId: activity.id, startedAt: now, members };
+  return { sim: { ...sim, live: [...sim.live, session] }, sessionId: session.id, result: "started", error: null, lateFor: null };
 }
 
 /** Main resolving the cartridge that just went in. */
@@ -236,13 +290,19 @@ function resolve(sim: Sim, tag: string, now: number): Sim {
   const deviceId = DEVICE.id;
   const activityId = labelOf(sim, tag);
   const activity = activityId ? sim.activities.find((a) => a.id === activityId) : undefined;
-  const slot = (outcome: Slot["outcome"], sessionId: string | null = null, error: string | null = null): Slot => ({
+  const slot = (
+    outcome: Slot["outcome"],
+    sessionId: string | null = null,
+    error: string | null = null,
+    lateFor: readonly string[] | null = null,
+  ): Slot => ({
     tag,
     since: iso(now),
     activityId,
     sessionId,
     outcome,
     error,
+    lateFor,
   });
   if (!activityId) {
     const seen = sim.record.unknown.find((item) => item.tag === tag);
@@ -263,8 +323,9 @@ function resolve(sim: Sim, tag: string, now: number): Sim {
   if (!activity || activity.archived) {
     return { ...sim, record: stamp(withDevice(sim, { slot: slot(activity ? "archived" : "orphan") }, now), null, false) };
   }
-  const done = track(sim, activity, now);
-  const record = stamp(withDevice(done.sim, { slot: slot(done.result, done.sessionId, done.error) }, now), done.sessionId, STARTED.includes(done.result));
+  const done = track(sim, activity, membersOf(sim, tag), now);
+  const inserted = slot(done.result, done.sessionId, done.error, done.lateFor);
+  const record = stamp(withDevice(done.sim, { slot: inserted }, now), done.sessionId, STARTED.includes(done.result));
   return { ...done.sim, record };
 }
 
@@ -353,9 +414,11 @@ export function useSimModel(start: StartState): PlayerModel {
         case "end-elsewhere":
           setSim((latest) => endSession(latest, slotOf(latest)?.sessionId ?? null, now));
           break;
-        case "start-elsewhere":
-          setSim((latest) => ({ ...latest, live: [...latest.live, { id: `s-${++sessionCounter}`, activityId: "cook", startedAt: now }] }));
+        case "start-elsewhere": {
+          const session: SimSession = { id: `s-${++sessionCounter}`, activityId: "cook", startedAt: now, members: [VIEWER] };
+          setSim((latest) => ({ ...latest, live: [...latest.live, session] }));
           break;
+        }
         case "delete-activity": {
           const target = (slot && labelOf(s, slot.tag)) ?? slot?.activityId ?? "deep-work";
           setSim((latest) => ({ ...latest, activities: latest.activities.filter((a) => a.id !== target) }));
@@ -393,6 +456,9 @@ export function useSimModel(start: StartState): PlayerModel {
         case "late-beat":
           setSim((latest) => ({ ...latest, lateBeat: !latest.lateBeat }));
           break;
+        case "solo":
+          setSim((latest) => ({ ...latest, members: latest.members.length > 1 ? MEMBERS.filter((m) => m.id === VIEWER) : MEMBERS }));
+          break;
         case "reset":
           timers.current.forEach((id) => window.clearTimeout(id));
           setSim(initial(start));
@@ -413,6 +479,7 @@ export function useSimModel(start: StartState): PlayerModel {
       failSave: sim.failSave,
       failStart: sim.failStart,
       lateBeat: sim.lateBeat,
+      members: sim.members.length,
     };
     window.dispatchEvent(new CustomEvent(STATE_EVENT, { detail: readout }));
   }, [sim]);
@@ -469,15 +536,31 @@ export function useSimModel(start: StartState): PlayerModel {
           }
           const seen = record.unknown.find((item) => item.tag === tag)?.lastSeenAt ?? null;
           record = { ...record, unknown: record.unknown.filter((item) => item.tag !== tag) };
-          record = withStats(record, tag, (stats) => (stats.seenAt === null ? { ...stats, seenAt: seen } : stats));
+          // A first label tracks for the member labelling it; one labelled again keeps whom it tracks for.
+          const first = previous === null || s.record.unknown.some((item) => item.tag === tag);
+          const byViewer = s.members.some((m) => m.id === VIEWER) ? [VIEWER] : [];
+          record = withStats(record, tag, (stats) => ({
+            ...stats,
+            seenAt: stats.seenAt ?? seen,
+            members: first && stats.members.length === 0 ? byViewer : stats.members,
+          }));
           const labelled: Sim = { ...s, mappings: { ...s.mappings, [tag]: activityId } };
           // A playing cartridge keeps its session; the new label applies next time it goes in.
           if (holder && !isLive(s, holder.sessionId) && (holder.activityId !== activityId || !STARTED.includes(holder.outcome))) {
             record = settle(labelled, record, holder, now);
-            const idle: Slot = { ...holder, activityId, sessionId: null, outcome: "idle", error: null };
+            const idle: Slot = { ...holder, activityId, sessionId: null, outcome: "idle", error: null, lateFor: null };
             record = { ...record, devices: { ...record.devices, [DEVICE.id]: { ...record.devices[DEVICE.id], slot: idle } } };
           }
           return { sim: { ...labelled, record }, result: { tag, activityId, previous, inSlot: holder !== null } };
+        }, true),
+      // main's `members`: the next insert or Start is for them; a running session keeps its people.
+      setMembers: (tag, members) =>
+        request<readonly string[]>((s) => {
+          const ids = new Set(s.members.map((m) => m.id));
+          const kept = [...new Set(members)].filter((id) => ids.has(id));
+          if (kept.length === 0) throw new PluginError("invalid", "Pick at least one person in this workspace");
+          if (labelOf(s, tag) === null) throw new PluginError("not-found", "Label this cartridge first");
+          return { sim: { ...s, record: withStats(s.record, tag, (stats) => ({ ...stats, members: kept })) }, result: kept };
         }, true),
       // main's `forget`: refused only while the cartridge is tracking or its player is online. A slot that holds it
       // on the word of a player that isn't is emptied in the same write.
@@ -507,7 +590,7 @@ export function useSimModel(start: StartState): PlayerModel {
           );
           return { sim: { ...s, record }, result: undefined };
         }, true),
-      // main's `start`: what starts is today's label, not what the cartridge went in as.
+      // main's `start`: what starts is today's label, not what the cartridge went in as, for its members.
       start: () =>
         request<StartResult>((s, now) => {
           const slot = slotOf(s);
@@ -521,8 +604,15 @@ export function useSimModel(start: StartState): PlayerModel {
           const activity = s.activities.find((a) => a.id === activityId);
           if (!activity) throw new PluginError("not-found", "Its activity no longer exists: label it again");
           if (activity.archived) throw new PluginError("invalid", "Its activity is archived: label it again");
-          const done = track(s, activity, now);
-          const next: Slot = { ...slot, activityId, sessionId: done.sessionId, outcome: done.result, error: done.error };
+          const done = track(s, activity, membersOf(s, slot.tag), now);
+          const next: Slot = {
+            ...slot,
+            activityId,
+            sessionId: done.sessionId,
+            outcome: done.result,
+            error: done.error,
+            lateFor: done.lateFor,
+          };
           // The slot alone: a request isn't a report from the player, so "last heard" and its `seq` stay as they were.
           const { id } = DEVICE;
           const settled = settle(s, s.record, slot, now);
@@ -560,6 +650,7 @@ export function useSimModel(start: StartState): PlayerModel {
       activities: sim.activities,
       lookup,
       categories: CATEGORIES,
+      members: sim.members,
       live: sim.live,
       mappings: sim.mappings,
       record: sim.record,

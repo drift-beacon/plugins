@@ -18,6 +18,7 @@ import type {
   RawPanel,
   Settings,
   SweepFill,
+  Zone,
 } from "./types.ts";
 
 /** What a user gets before they change anything. */
@@ -157,6 +158,24 @@ export function readGestureActions(raw: unknown): GestureActions {
     }
   }
   return actions;
+}
+
+/** The id the one zone, the whole wall, is given when it is first written. It never changes. */
+export const WALL_ZONE_ID = "wall";
+
+/**
+ * Who the wall follows: the first entry only (one zone, the whole wall), with its id (`WALL_ZONE_ID` when it has none)
+ * and its member (null unless a non-empty string). Anything else reads as no zones, so the wall follows the owner.
+ */
+export function readZones(raw: unknown): Zone[] {
+  if (!Array.isArray(raw) || !isRecord(raw[0])) return [];
+  const entry = raw[0];
+  return [{ id: readText(entry.id) ?? WALL_ZONE_ID, member: readText(entry.member) }];
+}
+
+/** What the picker writes to `zones` for `member`: the one zone, keeping its id (`WALL_ZONE_ID` the first time). */
+export function zonesFollowing(raw: unknown, member: string): Zone[] {
+  return [{ id: readZones(raw)[0]?.id ?? WALL_ZONE_ID, member }];
 }
 
 /**

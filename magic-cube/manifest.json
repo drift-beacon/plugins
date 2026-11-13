@@ -3,7 +3,7 @@
   "name": "Magic Cube",
   "icon": "icon.png",
   "version": "1.5.0",
-  "apiVersion": "0.3",
+  "apiVersion": "0.4",
   "description": "Use Aqrara Magic Cube to roll activities",
   "author": {
     "name": "@rshallam"

@@ -130,15 +130,23 @@ const LIVE_SESSION = {
   startedAt: new Date(T0 - 30 * 60_000),
   endedAt: null,
   memberIds: ["u"],
+  currentMemberIds: ["u"],
 };
+
+const ROSTER = [
+  { id: "u", name: "Rich", role: "OWNER" },
+  { id: "sam", name: "Sam", role: "MEMBER" },
+  { id: "alex", name: "Alex", role: "MEMBER" },
+];
 
 function model(patch = {}) {
   const noop = async () => {};
   return {
-    userId: "u",
     activities: [DEEP_WORK],
     sessions: [LIVE_SESSION],
     settings: DEFAULT_SETTINGS,
+    members: ROSTER,
+    zones: [],
     order: DEFAULT_ORDER,
     layout: LAYOUT,
     controller: { host: "192.168.1.40", port: 16021, name: "The Duck", model: "NL42" },
@@ -150,6 +158,7 @@ function model(patch = {}) {
     actions: {
       saveSettings: noop,
       saveOrder: noop,
+      saveZoneMember: noop,
       discover: async () => [],
       pair: async () => ({ name: null, model: null, panels: 0 }),
       forget: noop,
@@ -331,6 +340,48 @@ describe("settings switches are named by their own words (ux-13)", () => {
     assert.match(markup, /Session brightness/);
     assert.match(markup, /Pinned brightness/);
     assert.doesNotMatch(markup, /share of|% of max|Max brightness/);
+  });
+});
+
+describe("who the wall follows: one picker in the controller card", () => {
+  const pickerOf = (value) =>
+    findAll(parse(render(value, ui.ControllerCard)), (n) => n.attrs.role === "radiogroup" && n.attrs["aria-labelledby"]);
+
+  test("one choice per member, the one it follows checked, named and described by the agreed words", (t) => {
+    t.mock.method(Date, "now", () => T0);
+    const tree = parse(render(model({ zones: [{ id: "wall", member: "sam" }] }), ui.ControllerCard));
+    const [group] = findAll(tree, (n) => n.attrs.role === "radiogroup" && n.attrs["aria-labelledby"]);
+    const byId = new Map(findAll(tree, (n) => n.attrs.id !== undefined).map((n) => [n.attrs.id, n]));
+    assert.equal(squash(spoken(byId.get(group.attrs["aria-labelledby"]))), "This wall follows");
+    assert.equal(
+      squash(spoken(byId.get(group.attrs["aria-describedby"]))),
+      "It glows for their sessions, and a touch on the wall acts for them.",
+    );
+    const chips = findAll(group, (n) => n.tag === "button");
+    assert.deepEqual(
+      chips.map((chip) => [squash(spoken(chip)), chip.attrs.role, chip.attrs["aria-checked"], chip.attrs.tabindex]),
+      [
+        ["Rich", "radio", "false", "-1"],
+        ["Sam", "radio", "true", "0"],
+        ["Alex", "radio", "false", "-1"],
+      ],
+    );
+  });
+
+  test("nothing stored, or someone who left: the owner shows as followed", (t) => {
+    t.mock.method(Date, "now", () => T0);
+    for (const zones of [[], [{ id: "wall", member: null }], [{ id: "wall", member: "gone" }]]) {
+      const [group] = pickerOf(model({ zones }));
+      const checked = findAll(group, (n) => n.tag === "button" && n.attrs["aria-checked"] === "true");
+      assert.deepEqual(checked.map((chip) => squash(spoken(chip))), ["Rich"]);
+    }
+  });
+
+  test("a workspace of one, or no roster, has no picker", (t) => {
+    t.mock.method(Date, "now", () => T0);
+    assert.equal(pickerOf(model({ members: ROSTER.slice(0, 1) })).length, 0);
+    assert.equal(pickerOf(model({ members: [] })).length, 0);
+    assert.doesNotMatch(render(model({ members: ROSTER.slice(0, 1) }), ui.ControllerCard), /This wall follows/);
   });
 });
 

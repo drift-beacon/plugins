@@ -12,7 +12,7 @@ The contract between them lives in `shared/` and is imported by main, the interf
 | `shared/protocol.ts` | Player ↔ main over HTTP: reports, replies and the probe |
 | `shared/storage.ts` | `tagMappings` and the `player` record, their readers, and where a cartridge is (`activeDevice`, `slotHolding`) |
 | `shared/state.ts` | Published state (`player`, `slot`) and events (`inserted`, `ejected`) |
-| `shared/ui-channel.ts` | The private channel: `label`, `forget`, `dismiss`, `start`, the `reading { tag, deviceId, entry }` message, and the sentence a refused save is answered with (`SAVE_REFUSED`) |
+| `shared/ui-channel.ts` | The private channel: `label`, `members`, `forget`, `dismiss`, `start`, the `reading { tag, deviceId, entry }` message, and the sentence a refused save is answered with (`SAVE_REFUSED`) |
 | `shared/setup-code.ts` | The one-string setup code the interface builds and the player's setup page accepts |
 
 ## Principles
@@ -25,7 +25,18 @@ The contract between them lives in `shared/` and is imported by main, the interf
   over what main remembers having applied, so whatever main missed, the next heartbeat puts right. Nothing replays
   history, because sessions can't be backdated (`start()`/`end()` take no time).
 - **A cartridge ends only what it started.** The slot remembers the session its cartridge started or adopted; taking
-  the cartridge out ends that session if it's still live, never another one.
+  the cartridge out ends that session if it's still live, never another one, whoever is in it by then (nobody
+  included).
+- **A cartridge is for its members.** Each labelled cartridge has its own chosen members (`cartridges[tag].members`,
+  picked under "Tracks for" on its sheet), and what it starts or marks is for them, worked out each time it is needed
+  by `actingFor` (`shared/acting-for.ts`, which the interface calls too): the chosen members still in `ctx.members`,
+  else the workspace's owner, a fallback never written back. They leave the session they were in, as when they start
+  something in the app. It takes over only a session every one of them is in. Pulling the cartridge out ends the
+  session it started or took over for everyone in it, so others who joined it, or shared it before the cartridge took
+  it over, are taken out too. Start in the interface is for the cartridge's members too, whoever pressed it. The API
+  key a player reports with only lets it reach the hub: it says nothing about whom a cartridge is for. A start or a
+  mark always names its members: with nobody to name (an app that sends no members), nothing is started, marked or
+  taken over, the slot says so (outcome `error`) and main logs one warning.
 - **Settings survive.** `tagMappings` keeps its key and shape; the player keeps its `cartridge` Preferences namespace
   and keys, so updating either side never asks the user to set up again.
 
@@ -71,7 +82,7 @@ the cache; a `pair` report always takes its turn, since it may change the shown 
 Storage writes are optimistic, and the host rolls a rejected one back to the server's value: that change is lost.
 Main therefore reads the record again at every step and never assumes a write of its own is there. For a device
 report the next report heals it (step 1); the one thing main keeps in memory for that is an insert whose write was
-refused, so the heal doesn't perform it twice. An interface request (`label`, `forget`, `dismiss`) is answered only once its
+refused, so the heal doesn't perform it twice. An interface request (`label`, `members`, `forget`, `dismiss`) is answered only once its
 writes landed, and rejects with `failed` ("Couldn't save it; try again", `SAVE_REFUSED`) otherwise; sending it again is
 safe. `label` and `forget` write both keys, one after the other, and the second only once the first landed (step 6), so
 a refused write never leaves a cartridge nowhere. A `forget` that emptied a slot waits for its second write inside its
@@ -116,26 +127,39 @@ Input: the tag now in a device's slot (`null` = empty), from a report.
    while in, or whose session the user ended in the app, stays as it is. (`resumed` is answered on a reboot when its
    session is still live, so the player chirps.) A report saying empty with `reader: "fault"` keeps the slot's
    cartridge: a reader fault is never "out".
-3. **The slot held another tag (or is emptying)** → *eject* it: if `slot.sessionId` is a live span of this user, end
-   it; add its tracked time to `cartridges[tag].playedMs`; history `eject` with `durationMs`; event `ejected`. The
-   result is `ended` when it ended a session, `empty` otherwise, and `error` when ending failed and the session is
-   still live (the slot empties anyway: the cartridge is out). `durationMs` is the session's time while the cartridge
-   was in: from the later of its start and the insert, to its end; null for no session or a point. One widening of
-   "ends only what it started": a slot in outcome `error` has no session, but the start it was refused may have run
-   (the host stops waiting for an action after 10 s), so if its activity is live for this user at eject, that
-   session counts as the slot's and is ended. Every rule that asks whose a session is uses the same definition
-   (`slotSession`): such a slot counts as playing for `forget`, `label` and the shown player. (`start` still resolves
-   it, which adopts the session.) Published `slot` holds its last value while the session is being
-   ended (the end reaches main before the emptied slot is written), so it goes `playing` → `empty`, never through
-   `ready`.
-4. **A new tag goes in** → post `reading { tag, deviceId, entry }` to the interface at once (`entry` is the id of the
-   history entry this insert will write, so the interface can tell the outcome has arrived whichever of the message
-   and the storage write reaches it first), then resolve it:
+3. **The slot held another tag (or is emptying)** → *eject* it: if `slot.sessionId` is still a live span, end it,
+   whoever is in it; add its tracked time to `cartridges[tag].playedMs`; history `eject` with `durationMs`; event
+   `ejected`. The result is `ended` when it ended a session, `empty` otherwise, and `error` when ending failed and the
+   session is still live (the slot empties anyway: the cartridge is out). `durationMs` is the session's time while the
+   cartridge was in: from the later of its start and the insert, to its end; null for no session or a point. A slot in
+   outcome `error` has no session, but a refused start may still have run: the host stops waiting for an action after
+   10 s and rejects it `unavailable`, or drops it `stopped`, and the start can land later. For such a refusal (any but
+   one that certainly didn't run: `invalid`, `not-found` and the like) the slot keeps the members the start named
+   (`slot.lateFor`, stored on the slot, so a later change to the cartridge's members doesn't change which session it
+   claims), and the newest live span of its activity started for them at or after the insert (`slot.since`, taken
+   before the action runs) counts as the slot's and is ended. A start seats the members it names first, so they fill
+   the first `lateFor.length` seats of its `memberIds` (in any order; leaving it later doesn't matter), and a span
+   started by someone outside them has that person in one of those seats and isn't it. A refusal that can't have run
+   leaves nothing to find. The cost left: after a refusal that may have run, a session the same members started of
+   that activity in the app meanwhile is taken for the late one and ended on eject, and so is one some of them
+   started that the rest joined before anyone else did, since its first seats hold the same people. Every rule that asks whose a session is uses the same definition (`slotSession`): such a slot counts as
+   playing for `forget`, `label` and the shown player. (`start` adopts that session when the cartridge's members are
+   all in it; otherwise it starts one for them, and the late one then runs on, no longer the slot's.) Published `slot`
+   holds its last value while the session is being ended (the end reaches main before the emptied slot is written),
+   so it goes `playing` → `empty`, never through `ready`.
+4. **A new tag goes in** (for the cartridge's members, `actingFor`) → post `reading { tag, deviceId, entry }` to
+   the interface at once (`entry` is the id of the history entry this insert will write, so the interface can tell the
+   outcome has arrived whichever of the message and the storage write reaches it first), then resolve it:
    - not labelled → outcome `unknown`; add or refresh it in `unknown` (newest first, at most 20); history `new`
    - labelled, activity gone → `orphan`; archived → `archived` (nothing starts)
-   - a point activity → `mark()` → `marked`
-   - a span activity already live for this user → adopt that session (no new start) → `resumed`
-   - otherwise `track()` → `started`
+   - nobody to name (`ctx.members` is empty or missing, so `actingFor` gives none) → nothing is sent and nothing is
+     adopted: outcome `error` with "Nothing started: this Drift Beacon doesn't say who's in the workspace", one
+     warning in the log, `lateFor` null
+   - a point activity → `mark({ members })` → `marked`
+   - a live span of the activity with every one of the members in it (`currentMemberIds`) → adopt that session (no
+     new start) → `resumed`. A span only some of them are in, or nobody, is never adopted.
+   - otherwise `track({ members })` → `started`
+   - only members in `ctx.members` are named (a name that isn't refuses the whole action), and never `members: []`
    - an action that rejects → `error` with its message; the player gets `cue: "error"` and the slot stays, so the
      interface can offer Start again
    - for a labelled cartridge: `plays += 1` for started/resumed/marked; `seenAt` = now; history `insert`. Event
@@ -161,9 +185,13 @@ Input: the tag now in a device's slot (`null` = empty), from a report.
      (60 s), change nothing and don't count as hearing from it: four players are served well instead of five taking
      turns in the record.
 6. **Interface requests.**
-   - `label {tag, activityId}`: the tag must be a UID and the activity must exist and not be archived (`invalid`
-     otherwise). Writes the mapping (canonical key), drops the tag from `unknown` (its stats' `seenAt` starts from
-     when it was last seen there), history `label` or `relabel` (nothing when the label is unchanged). If the tag is
+   - `label {tag, activityId, members?}`: the tag must be a UID and the activity must exist and not be archived
+     (`invalid` otherwise). Writes the mapping (canonical key), drops the tag from `unknown` (its stats' `seenAt`
+     starts from when it was last seen there), history `label` or `relabel` (nothing when the label is unchanged).
+     `members`, when given, is checked as `members` checks it and becomes whom it tracks for. Otherwise a first label
+     (a new cartridge, or one still in `unknown` because its record write was refused last time) with no members yet
+     tracks for the member labelling it (`meta.memberId`) while they are in `ctx.members`, and for nobody picked (so
+     the owner) otherwise; a relabel keeps its members. If the tag is
      in a slot (as `slotHolding` sees it) and its session isn't live: the slot gets the new `activityId`, outcome
      `idle`, no session (the time an ended session tracked is added to the cartridge first); labelled again with the
      activity it already started or marked there, the slot stays as it is. A playing cartridge keeps its slot too:
@@ -180,13 +208,18 @@ Input: the tag now in a device's slot (`null` = empty), from a report.
      (against step 2). If that player reports the cartridge still in after all, the reported
      slot wins (step 1) and it is in the slot as an unlabelled cartridge. `{ forgotten: false }`, and nothing changes,
      when it wasn't labelled.
+   - `members {tag, members}`: whom a labelled cartridge tracks for (`not-found`, "Label this cartridge first",
+     otherwise). Repeats are dropped and anyone not in `ctx.members` is left out; refused (`invalid`, "Pick at least
+     one person in this workspace") when that leaves nobody. Writes only `cartridges[tag].members`, no history. It
+     applies the next time the cartridge goes in or Start is pressed: a running session keeps the people in it.
    - `dismiss {tag}`: drops it from `unknown`; history `dismiss`. `{ dismissed: false }` when it wasn't listed.
-   - `start {deviceId?}` (the shown device by default): a slot already playing its own session answers `resumed`
-     and does nothing, whatever the cartridge is labelled now. Otherwise the slot must hold a labelled cartridge
-     whose activity exists (`not-found` otherwise; `invalid` when it's archived); same resolution as step 4 from "a
-     point activity" on; history `start`, `plays += 1`. A rejected action leaves outcome `error` and rejects the
-     request with the action's `PluginError`.
-   - `label`, `forget` and `dismiss` are answered once their storage writes landed, and reject with `failed` when one
+   - `start {deviceId?}` (the shown device by default): a slot already playing its own session answers `resumed` and
+     does nothing, whatever the cartridge is labelled now. Otherwise the slot must hold a labelled cartridge whose
+     activity exists (`not-found` otherwise; `invalid` when it's archived); same resolution as step 4 from "a point
+     activity" on, for the cartridge's members, whoever pressed Start; history `start`, `plays += 1`. A rejected
+     action leaves outcome `error` and rejects the request with the action's `PluginError`; with nobody to name, the
+     slot's message, as `invalid`.
+   - `label`, `members`, `forget` and `dismiss` are answered once their storage writes landed, and reject with `failed` when one
      was refused (One queue, above). `label` and `forget` write two keys, and the write that takes the cartridge away
      from where the user would ask again goes last, only once the other landed: `label` writes the mapping and then the
      record (which drops the cartridge from `unknown`), `forget` the record and then the mapping (which takes it off
@@ -206,7 +239,8 @@ Input: the tag now in a device's slot (`null` = empty), from a report.
 
 See `shared/storage.ts` and `shared/state.ts`. History keeps 50 entries; the interface reads the latest `eject` for
 its "Saved" moment. A labelled cartridge has a `cartridges` entry once it has been labelled, gone in or come out;
-before that it reads as `NO_STATS`.
+before that it reads as `NO_STATS`. The entry holds whom it tracks for (`members`, empty while nobody is picked)
+beside its stats, so forgetting a cartridge drops them with its stats and labelling it again starts afresh.
 
 Published state (both always present while main runs):
 
@@ -221,7 +255,10 @@ field required, nullable through type lists). `uses` keeps `magic-cube` for the 
 
 ### Tests
 
-`tests/protocol.test.mjs` and `tests/storage.test.mjs` cover `shared/`.
+`tests/protocol.test.mjs` and `tests/storage.test.mjs` cover `shared/`. `tests/main.test.mjs` covers whose a session
+is: the policy (`actingFor`, `resolveCartridge`'s adopt rule, `isOwnLiveSpan`, `mayHaveRun`, `lateFor`,
+`lateSession`) and, through `createPlugin({ now, timers })` over a small fake `ctx`, what an insert, an eject, Start,
+a label and a `members` request ask the workspace to do, and what they store.
 
 ## Player (firmware 2.x)
 
@@ -525,7 +562,8 @@ sits on a stage above a shelf of cartridges.
 ### Data
 
 Storage (`tagMappings`, `player`) through the shared readers; workspace activities (archived included, so a cartridge
-can still show one), categories and the user's live span sessions as plain rows;
+can still show one), categories and the workspace's live span sessions (anyone's, and those nobody is in; the slot's
+own is found by its id) as plain rows;
 `ctx.plugins.self.state.get("player")` for presence (undefined, read as null, while main isn't running);
 `ctx.plugins.self.status` for whether main runs (an `unavailable` the page opened with counts as "connecting" for
 3 s, so opening never flashes a false alarm); `ctx.main.onMessage("reading")` for the reading beat (dropped on
@@ -603,8 +641,15 @@ first), Most played (plays, then time), A–Z (deleted activities last), as a ra
 appears; past 24 reorders stop animating. The shelf's cards stagger in when it first appears. "Seen, not labelled"
 (`unknown` minus the one on the stage) lists the rest, each with Label and Dismiss.
 
-A cartridge opens its details (popover on wide, sheet on phone), compact: stats, its label with Change, and Forget
-behind a confirmation (off while it's tracking or in a player that's online). Change swaps the body for the activity
+A cartridge opens its details (popover on wide, sheet on phone), compact: stats, its label with Change, whom it
+tracks for, and Forget behind a confirmation (off while it's tracking or in a player that's online). "Tracks for"
+("Putting this cartridge in starts its activity for the people you pick.") is a chip per member, ticked for each one
+`actingFor` names, so one nobody picked for shows the owner ticked; the last ticked chip shakes instead of unticking.
+Each change sends `members` at once and the chips show it while it travels, then what main answers it stored (main
+leaves out anyone no longer in the workspace, whom this device may still list); a member the roster drops is never
+ticked, so the last-chip rule counts only chips on screen. It is off while main isn't running, and
+hidden in a workspace of one or when the app sends no members. The one-tap labels on the stage and in "Seen, not
+labelled" have no people row: a first label tracks for whoever labels it. Change swaps the body for the activity
 picker and back, so there is one scrolling region at a time and Forget stays in view. Relabelling is allowed while
 playing: the running session carries on and the label applies next time; the card and the details then name both
 activities ("Gym, in the player, tracking Deep work"). The picker's highlight starts on the current activity, so
@@ -706,7 +751,8 @@ just set up), end the session elsewhere, start
 another, delete or archive the activity, player offline, main stopped (started again, it waits a few seconds to hear
 from the player, as main does for 75 s), the next request timing out, storage refusing the next label, forget or
 dismiss, the next start being refused by the app (main records the error on the slot), the reading message arriving
-after its outcome, light/dark, forced reduced motion (Motion and the CSS loops). Its eject is one update, so the
+after its outcome, a workspace of one (its owner alone) or of three members (Alex, the owner and viewer, Sam and
+Riley; some cartridges track for Sam or Riley, the rest for nobody picked), light/dark, forced reduced motion (Motion and the CSS loops). Its eject is one update, so the
 gap the stage holds across (see Data) only shows against the real main. Variants: playing, first run, empty shelf,
 seen but not labelled, 60 cartridges. `?explore=1` brings back the Deck, Marquee and Receiver
 explorations, and `?setup` the four first-run directions the guide was chosen from (Guided, Ticket, Checklist,

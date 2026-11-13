@@ -31,6 +31,9 @@ export function createMainChannel(main: MainPort, readRecord: () => PlayerRecord
   return {
     actions: {
       label: (tag, activityId) => main.request("label", { tag, activityId }),
+      async setMembers(tag, members) {
+        return (await main.request("members", { tag, members: [...members] })).members;
+      },
       async forget(tag) {
         await main.request("forget", { tag });
       },

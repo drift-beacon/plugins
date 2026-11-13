@@ -18,12 +18,23 @@ function activity(id, extra = {}) {
     goal: null,
     period: "day",
     pinned: false,
+    placedBy: null,
+    progress: { type: "duration", seconds: 0 },
     ...extra,
   };
 }
 
 function live(id, activityId, start, members = [ME]) {
-  return { id, activityId, type: "span", status: "live", memberIds: members, startedAt: start, endedAt: null };
+  return {
+    id,
+    activityId,
+    type: "span",
+    status: "live",
+    memberIds: members,
+    currentMemberIds: members,
+    startedAt: start,
+    endedAt: null,
+  };
 }
 
 const PAUSE = { kind: "pause-resume" };
@@ -31,38 +42,47 @@ const STOP = { kind: "stop-unpin" };
 
 /* ---- resolveGesture: what an action does, as the wall shows things ---- */
 
-test("the adaptive actions act on the live session, else on the pin, else do nothing", () => {
+test("the adaptive actions act on the session the wall shows, else on the pin, else do nothing", () => {
   const work = activity("work");
   const guitar = activity("guitar", { pinned: true });
   const session = live("s1", "work", new Date(1000));
 
-  assert.deepEqual(resolveGesture(PAUSE, ME, [work, guitar], [session]), {
+  assert.deepEqual(resolveGesture(PAUSE, [work, guitar], [session], [ME]), {
     kind: "pause",
     sessionId: "s1",
     activityId: "work",
+    placedBy: ME,
   });
-  assert.deepEqual(resolveGesture(STOP, ME, [work, guitar], [session]), {
+  assert.deepEqual(resolveGesture(STOP, [work, guitar], [session], [ME]), {
     kind: "stop",
     sessionId: "s1",
     activityId: "work",
   });
-  assert.deepEqual(resolveGesture(PAUSE, ME, [work, guitar], []), { kind: "track", activityId: "guitar" });
-  assert.deepEqual(resolveGesture(STOP, ME, [work, guitar], []), { kind: "unpin", activityId: "guitar" });
-  assert.equal(resolveGesture(PAUSE, ME, [work], []), null);
-  assert.equal(resolveGesture(STOP, ME, [work], []), null);
-  assert.equal(resolveGesture(undefined, ME, [work, guitar], [session]), null);
+  assert.deepEqual(resolveGesture(PAUSE, [work, guitar], [], [ME]), {
+    kind: "track",
+    activityId: "guitar",
+    members: [ME],
+  });
+  assert.deepEqual(resolveGesture(STOP, [work, guitar], [], [ME]), { kind: "unpin", activityId: "guitar" });
+  assert.equal(resolveGesture(PAUSE, [work], [], [ME]), null);
+  assert.equal(resolveGesture(STOP, [work], [], [ME]), null);
+  assert.equal(resolveGesture(undefined, [work, guitar], [session], [ME]), null);
 });
 
-test("the adaptive actions pick what the wall shows: the newest live span of mine, and the workspace's pin", () => {
+test("the adaptive actions pick the newest live span the member the wall follows is in, then the pin", () => {
   const a = activity("a");
   const b = activity("b", { pinned: true });
   const older = live("old", "a", new Date(1000));
   const newer = live("new", "b", new Date(2000));
   const theirs = live("theirs", "a", new Date(3000), [THEM]);
-  assert.equal(resolveGesture(STOP, ME, [a, b], [older, newer, theirs])?.sessionId, "new");
-  assert.deepEqual(resolveGesture(STOP, ME, [a, b], []), { kind: "unpin", activityId: "b" }, "the workspace's pin is everyone's to unpin");
+  const sessions = [older, newer, theirs];
+  assert.equal(resolveGesture(STOP, [a, b], sessions, [ME])?.sessionId, "new", "not a session only others are in");
+  assert.equal(resolveGesture(STOP, [a, b], sessions, [THEM])?.sessionId, "theirs");
+  assert.equal(resolveGesture(PAUSE, [a, b], [older, newer], [ME])?.sessionId, "new");
+  const unpin = { kind: "unpin", activityId: "b" };
+  assert.deepEqual(resolveGesture(STOP, [a, b], [theirs], [ME]), unpin, "only others live: the pin");
   const archivedPin = activity("c", { archived: true, pinned: true });
-  assert.equal(resolveGesture(PAUSE, ME, [archivedPin], []), null, "an archived pin doesn't show");
+  assert.equal(resolveGesture(PAUSE, [archivedPin], [], [ME]), null, "an archived pin doesn't show");
 });
 
 test("start and pin act on the chosen activity whatever is going on, unless there is nothing to do", () => {
@@ -72,24 +92,85 @@ test("start and pin act on the chosen activity whatever is going on, unless ther
   const session = live("s1", "work", new Date(1000));
 
   assert.deepEqual(
-    resolveGesture({ kind: "start", activityId: "reading" }, ME, [work, reading], [session]),
-    { kind: "track", activityId: "reading" },
+    resolveGesture({ kind: "start", activityId: "reading" }, [work, reading], [session], [ME]),
+    { kind: "track", activityId: "reading", members: [ME] },
     "alongside what's live, as core starts a second session",
   );
-  assert.equal(resolveGesture({ kind: "start", activityId: "work" }, ME, [work], [session]), null, "already live");
-  assert.deepEqual(resolveGesture({ kind: "start", activityId: "vitamins" }, ME, [vitamins], []), {
+  assert.equal(resolveGesture({ kind: "start", activityId: "work" }, [work], [session], [ME]), null, "already in it");
+  assert.deepEqual(resolveGesture({ kind: "start", activityId: "vitamins" }, [vitamins], [], [ME]), {
     kind: "track",
     activityId: "vitamins",
+    members: [ME],
   });
-  assert.deepEqual(resolveGesture({ kind: "pin", activityId: "reading" }, ME, [work, reading], [session]), {
+  assert.deepEqual(resolveGesture({ kind: "pin", activityId: "reading" }, [work, reading], [session], [ME]), {
     kind: "pin",
     activityId: "reading",
+    placedBy: ME,
   });
   const pinned = activity("reading", { pinned: true });
-  assert.equal(resolveGesture({ kind: "pin", activityId: "reading" }, ME, [pinned], []), null, "already pinned");
-  assert.equal(resolveGesture({ kind: "start", activityId: "gone" }, ME, [work], []), null);
+  assert.equal(resolveGesture({ kind: "pin", activityId: "reading" }, [pinned], [], [ME]), null, "already pinned");
+  assert.equal(resolveGesture({ kind: "start", activityId: "gone" }, [work], [], [ME]), null);
   const archived = activity("old", { archived: true });
-  assert.equal(resolveGesture({ kind: "pin", activityId: "old" }, ME, [archived], []), null);
+  assert.equal(resolveGesture({ kind: "pin", activityId: "old" }, [archived], [], [ME]), null);
+});
+
+/* ---- Who a gesture is for ---- */
+
+const START_WORK = { kind: "start", activityId: "work" };
+
+test("a start does nothing when the member followed is in a running span of it; else it starts for them", () => {
+  const work = activity("work");
+  const forMe = { kind: "track", activityId: "work", members: [ME] };
+  const shared = live("s1", "work", new Date(1000), [ME, THEM]);
+  assert.equal(resolveGesture(START_WORK, [work], [shared], [ME]), null, "in it with someone else");
+  const others = live("s3", "work", new Date(1000), [THEM]);
+  assert.deepEqual(resolveGesture(START_WORK, [work], [others], [ME]), forMe, "a span only others are in");
+  const left = { ...shared, currentMemberIds: [THEM] };
+  assert.deepEqual(resolveGesture(START_WORK, [work], [left], [ME]), forMe, "who is in it now counts");
+  const ended = { ...shared, status: "completed", currentMemberIds: [] };
+  assert.deepEqual(resolveGesture(START_WORK, [work], [ended], [ME]), forMe, "an ended span");
+  const point = activity("vitamins", { trackingType: "point" });
+  const marked = { ...shared, id: "p1", activityId: "vitamins", type: "point", status: "completed" };
+  assert.deepEqual(resolveGesture({ kind: "start", activityId: "vitamins" }, [point], [marked], [ME]), {
+    kind: "track",
+    activityId: "vitamins",
+    members: [ME],
+  });
+});
+
+test("resume starts the pin for the member followed, whoever placed it", () => {
+  const guitar = activity("guitar", { pinned: true, placedBy: THEM });
+  assert.deepEqual(resolveGesture(PAUSE, [guitar], [], [ME]), { kind: "track", activityId: "guitar", members: [ME] });
+  const bySchedule = activity("guitar", { pinned: true, placedBy: null });
+  assert.deepEqual(resolveGesture(PAUSE, [bySchedule], [], [THEM]), {
+    kind: "track",
+    activityId: "guitar",
+    members: [THEM],
+  });
+});
+
+test("a pause or pin is placed by the member followed, whoever else is in the session", () => {
+  const work = activity("work");
+  const reading = activity("reading");
+  const session = live("s1", "work", new Date(1000), [ME, THEM]);
+  const PIN = { kind: "pin", activityId: "reading" };
+  assert.equal(resolveGesture(PAUSE, [work], [session], [THEM]).placedBy, THEM);
+  assert.equal(resolveGesture(PAUSE, [work], [session], [ME]).placedBy, ME);
+  assert.equal(resolveGesture(PIN, [work, reading], [], [ME]).placedBy, ME);
+  assert.equal(resolveGesture(PIN, [work, reading], [], [THEM]).placedBy, THEM);
+});
+
+test("following nobody: the wall shows no session, and a start or resume names nobody", () => {
+  const work = activity("work");
+  const guitar = activity("guitar", { pinned: true });
+  const session = live("s1", "work", new Date(1000));
+  assert.deepEqual(resolveGesture(PAUSE, [work, guitar], [session], []), {
+    kind: "track",
+    activityId: "guitar",
+    members: [],
+  });
+  const nobody = { kind: "track", activityId: "work", members: [] };
+  assert.deepEqual(resolveGesture(START_WORK, [work], [session], []), nobody);
 });
 
 /* ---- Settings: what storage may hold ---- */
@@ -120,19 +201,19 @@ test("readGestureActions keeps known gestures and actions, and an activity's id"
 
 /* ---- Main: acting on a gesture ---- */
 
-/** A gestures handler over plain data, recording what it was asked to do. */
-function harness({ settings = {}, activities = [], sessions = [], drafting = false, act } = {}) {
+/** A gestures handler over plain data, recording what it was asked to do (with who a step is for or placed by). */
+function harness({ settings = {}, activities = [], sessions = [], following = [ME], drafting = false, act } = {}) {
   const calls = [];
   const logs = [];
   const record =
     (kind) =>
-    (id) => {
-      calls.push([kind, id]);
+    (id, who) => {
+      calls.push(who === undefined ? [kind, id] : [kind, id, who]);
       return act ? act(kind, id) : Promise.resolve();
     };
-  const state = { drafting, settings, data: () => ({ activities, sessions }) };
+  const state = { drafting, settings, following, data: () => ({ activities, sessions }) };
   const onGesture = createGestures({
-    userId: ME,
+    following: () => state.following,
     settings: () => readSettings({ ...state.settings }),
     data: () => state.data(),
     drafting: () => state.drafting,
@@ -159,7 +240,7 @@ test("main does what the gesture's action resolves to, and logs it", async () =>
   await h.onGesture("swipe-down");
   await h.onGesture("tap");
   assert.deepEqual(h.calls, [
-    ["pause", "s1"],
+    ["pause", "s1", ME],
     ["stop", "s1"],
   ]);
   assert.deepEqual(
@@ -183,7 +264,7 @@ test("main leaves the workspace alone while gestures are off or tap to order hol
   assert.deepEqual(drafting.calls, [], "taps are numbering panels");
   drafting.state.drafting = false;
   await drafting.onGesture("double-tap");
-  assert.deepEqual(drafting.calls, [["pause", "s1"]]);
+  assert.deepEqual(drafting.calls, [["pause", "s1", ME]]);
 });
 
 test("main does one gesture at a time: one that arrives meanwhile is dropped", async () => {
@@ -201,7 +282,7 @@ test("main does one gesture at a time: one that arrives meanwhile is dropped", a
   });
   const first = h.onGesture("double-tap");
   await h.onGesture("double-tap");
-  assert.deepEqual(h.calls, [["track", "guitar"]], "the second resume never ran");
+  assert.deepEqual(h.calls, [["track", "guitar", [ME]]], "the second resume never ran");
   finish();
   await first;
   await h.onGesture("swipe-down");
@@ -212,7 +293,7 @@ test("main says a point activity was marked done, not started", async () => {
   const vitamins = activity("vitamins", { name: "Take vitamins", trackingType: "point", pinned: true });
   const h = harness({ activities: [vitamins] });
   await h.onGesture("double-tap");
-  assert.deepEqual(h.calls, [["track", "vitamins"]]);
+  assert.deepEqual(h.calls, [["track", "vitamins", [ME]]]);
   assert.equal(h.logs[0][1], "double-tap: marked Take vitamins done");
 });
 
@@ -264,5 +345,111 @@ test("a failure before any action, reading what's going on, is logged and never 
   );
   h.state.data = () => ({ activities: [activity("g", { pinned: true })], sessions: [] });
   await h.onGesture("double-tap");
-  assert.deepEqual(h.calls, [["track", "g"]], "not left busy");
+  assert.deepEqual(h.calls, [["track", "g", [ME]]], "not left busy");
+});
+
+test("main reads who the wall follows at each gesture", async () => {
+  const guitar = activity("guitar", { pinned: true });
+  const h = harness({
+    settings: { gestureActions: { tap: { kind: "pin", activityId: "reading" }, "double-tap": PAUSE } },
+    activities: [guitar, activity("reading")],
+  });
+  await h.onGesture("double-tap");
+  h.state.following = [THEM];
+  await h.onGesture("double-tap");
+  await h.onGesture("tap");
+  assert.deepEqual(h.calls, [
+    ["track", "guitar", [ME]],
+    ["track", "guitar", [THEM]],
+    ["pin", "reading", THEM],
+  ]);
+});
+
+test("following nobody, a start or resume does nothing and logs one warning", async () => {
+  const work = activity("work", { name: "Deep work" });
+  const guitar = activity("guitar", { name: "Guitar", pinned: true });
+  const h = harness({
+    settings: { gestureActions: { tap: START_WORK, "double-tap": PAUSE } },
+    activities: [work, guitar],
+    following: [],
+  });
+  await h.onGesture("tap");
+  await h.onGesture("double-tap");
+  assert.deepEqual(h.calls, []);
+  assert.deepEqual(h.logs, [
+    ["warn", "tap: didn't start Deep work: Drift Beacon sent no workspace members, so nobody can be named"],
+    ["warn", "double-tap: didn't start Guitar: Drift Beacon sent no workspace members, so nobody can be named"],
+  ]);
+});
+
+/* ---- Through the SDK (main/src/index.ts) ---- */
+
+test("through the SDK, a start names its members and a pause or pin who placed it", async () => {
+  const { gestureActions } = await import("../main/src/index.ts");
+  const calls = [];
+  const ctx = {
+    activities: {
+      get: (id) =>
+        id === "work"
+          ? {
+              track: async (options) => {
+                calls.push(["track", id, options]);
+                return { id: "w1" };
+              },
+            }
+          : undefined,
+      pin: async (id, options) => void calls.push(["pin", id, options]),
+    },
+    sessions: { pause: async (id, options) => void calls.push(["pause", id, options]) },
+  };
+  const actions = gestureActions(ctx);
+  await actions.track("work", [THEM]);
+  await actions.pause("s1", THEM);
+  await actions.pin("work", ME);
+  await actions.pin("work", null);
+  assert.deepEqual(calls, [
+    ["track", "work", { members: [THEM] }],
+    ["pause", "s1", { placedBy: THEM }],
+    ["pin", "work", { placedBy: ME }],
+    ["pin", "work", { placedBy: null }],
+  ]);
+  await assert.rejects(actions.track("gone", [ME]), { code: "not-found" });
+});
+
+test("a Drift Beacon that sends no members: the wall follows nobody, a start sends nothing and warns", async () => {
+  const { followingOf, workspaceData } = await import("../main/src/index.ts");
+  const work = activity("work", { name: "Deep work" });
+  const stored = { zones: undefined };
+  // No `members` key, as from a hub before `ctx.members`.
+  const ctx = {
+    storage: { get: (key) => stored[key] },
+    activities: { list: () => [{ data: work }] },
+    sessions: { list: () => [] },
+  };
+  const following = followingOf(ctx);
+  assert.deepEqual(following(), [], "nothing stored");
+  stored.zones = [{ id: "wall", member: THEM }];
+  assert.deepEqual(following(), [], `zone member ${THEM} stored`);
+  const data = workspaceData(ctx);
+  assert.deepEqual(data().members, []);
+
+  const calls = [];
+  const logs = [];
+  const onGesture = createGestures({
+    following,
+    settings: () => readSettings({ gestureActions: { tap: START_WORK } }),
+    data,
+    drafting: () => false,
+    actions: { track: async (id, members) => void calls.push(["track", id, members]) },
+    log: {
+      info: (...args) => logs.push(["info", ...args]),
+      warn: (...args) => logs.push(["warn", ...args]),
+      error: (...args) => logs.push(["error", ...args]),
+    },
+  });
+  await onGesture("tap");
+  assert.deepEqual(calls, []);
+  assert.deepEqual(logs, [
+    ["warn", "tap: didn't start Deep work: Drift Beacon sent no workspace members, so nobody can be named"],
+  ]);
 });

@@ -18,6 +18,8 @@ export interface LibraryItem {
   readonly playedMs: number;
   /** When it last went in or came out (epoch ms), or null if never since it was labelled. */
   readonly seenAt: number | null;
+  /** The members it tracks for, as chosen; `actingFor` says whom it starts for (none chosen: the owner). */
+  readonly members: readonly string[];
   /** It's in a player now. */
   readonly inSlot: boolean;
   /** It's in a player and the session it started is live. */
@@ -62,6 +64,7 @@ export function buildLibrary(
       plays: stats?.plays ?? 0,
       playedMs: stats?.playedMs ?? 0,
       seenAt: epoch(stats?.seenAt),
+      members: stats?.members ?? [],
       inSlot: held !== null,
       live: session !== undefined,
       tracking: session ? (activities.get(session.activityId) ?? null) : null,

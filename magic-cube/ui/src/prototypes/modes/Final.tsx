@@ -1,6 +1,7 @@
 import { cn } from "@heroui/theme";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useMemo, useRef, useState, type ComponentType, type ComponentProps } from "react";
+import { RollsFor } from "../../components/setup/kit";
 import { createAnchors, Cube3D } from "./cube/Cube3D";
 import { FaceEditor } from "./face-editor";
 import { ModeCards, ModeEditor, NoticeToast, PinTrackSwitch } from "./kit";
@@ -8,6 +9,7 @@ import { resultFor, useCubeArt, useMediaQuery } from "./live";
 import { type Face, type Workspace, isReady, useWorkspace } from "./model";
 import { EASE_OUT } from "./motion";
 import { PresetShelf } from "./preset-shelf";
+import { toggleRoster, useRoster } from "./roster";
 import { useCubeSim } from "./sim";
 import { LiveOverlay } from "./Twin";
 
@@ -24,6 +26,7 @@ export function Final({ workspace, hidePresets = false, ModePanel }: { workspace
   const ws = workspace ?? localWorkspace;
   const [presetsExpanded, setPresetsExpanded] = useState(false);
   const sim = useCubeSim(ws);
+  const roster = useRoster();
   const wide = useMediaQuery("(min-width: 768px)");
   const reduced = useReducedMotion();
   const anchors = useMemo(createAnchors, []);
@@ -78,7 +81,10 @@ export function Final({ workspace, hidePresets = false, ModePanel }: { workspace
             {ws.active?.name ?? "Unsaved setup"}
           </motion.h2>
         </AnimatePresence>
-        <PinTrackSwitch ws={ws} className="shrink-0" />
+        <div className="flex shrink-0 items-center gap-2">
+          <RollsFor members={roster.members} chosen={roster.chosen} onToggle={toggleRoster} />
+          <PinTrackSwitch ws={ws} className="shrink-0" />
+        </div>
       </div>
       {!ModePanel && <ModeCards compact value={mode} onChange={(m) => ws.update({ mode: m })} />}
       <Editor

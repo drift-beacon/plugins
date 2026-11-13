@@ -1,8 +1,8 @@
 // Prototype-only: the workspace and storage the simulator starts from, shaped exactly like what the live model reads
 // (shared/storage.ts records, view rows). Worst cases on purpose: a very long name, a deleted activity, an archived
 // one, a point activity, activities without a category or an icon, a cartridge never played.
-import { emptyPlayerRecord, type HistoryEntry, type PlayerRecord } from "../../../shared/storage.ts";
-import type { ActivityView, CategoryView } from "../view/types.ts";
+import { type CartridgeStats, emptyPlayerRecord, type HistoryEntry, type PlayerRecord } from "../../../shared/storage.ts";
+import type { ActivityView, CategoryView, MemberView } from "../view/types.ts";
 import { MDI } from "./player/fixtures.ts";
 
 const MIN = 60_000;
@@ -11,6 +11,15 @@ const DAY = 24 * HOUR;
 
 export const DEVICE = { id: "cp-a1b2c3", name: "Cartridge-A1B2", fw: "2.0.0", hubHost: "192.168.1.12:9821" } as const;
 export const API_PATH = "/api/plugins/cartridge-player-dev/api";
+
+/** The workspace's members: three, one of them its owner. The panel's "One member" leaves the owner alone. */
+export const MEMBERS: MemberView[] = [
+  { id: "m-alex", name: "Alex", role: "OWNER" },
+  { id: "m-sam", name: "Sam", role: "MEMBER" },
+  { id: "m-riley", name: "Riley", role: "MEMBER" },
+];
+/** The member viewing the plugin: the owner, so they are the one left in a workspace of one. */
+export const VIEWER = "m-alex";
 
 export const CATEGORIES: CategoryView[] = [
   { id: "work", name: "Work", color: "#60a5fa", iconPath: MDI.briefcase },
@@ -73,6 +82,13 @@ const LIBRARY: [string, string, number | null, number, number][] = [
   ["04:6C:11:9E:2B:47:80", "water", 2 * DAY, 12, 0],
 ];
 
+/** Whom some cartridges track for; the rest have nobody picked, so they track for the owner. */
+const CHOSEN: Readonly<Record<string, readonly string[]>> = {
+  "04:A2:3B:1C:7F:5D:80": ["m-sam"],
+  "04:C4:58:2E:61:0B:80": ["m-sam", "m-riley"],
+  "04:19:E6:52:33:71:80": ["m-riley"],
+};
+
 /** Cartridges with fresh stickers the player has never seen. */
 export const BLANK_TAGS = ["04:9C:41:E7:08:B3:81", "04:61:BD:2A:F5:1C:80", "04:0A:73:C8:4E:95:81", "04:D7:20:5B:A9:6F:80"];
 
@@ -86,8 +102,13 @@ const iso = (ms: number) => new Date(ms).toISOString();
 export interface SimStart {
   readonly mappings: Record<string, string>;
   readonly record: PlayerRecord;
-  /** The session the slot's cartridge started, if it's live. */
-  readonly live: { readonly id: string; readonly activityId: string; readonly startedAt: number }[];
+  /** The session the slot's cartridge started, if it's live, with its members in seat order. */
+  readonly live: {
+    readonly id: string;
+    readonly activityId: string;
+    readonly startedAt: number;
+    readonly members: readonly string[];
+  }[];
 }
 
 /** Where a variant starts. */
@@ -96,7 +117,7 @@ export function simStart(state: StartState, now = Date.now()): SimStart {
   if (state === "first-run") return { mappings: {}, record, live: [] };
 
   const mappings: Record<string, string> = {};
-  const cartridges: Record<string, { seenAt: string | null; plays: number; playedMs: number }> = {};
+  const cartridges: Record<string, CartridgeStats> = {};
   const library =
     state === "big"
       ? Array.from({ length: 60 }, (_, i): [string, string, number | null, number, number] => [
@@ -111,7 +132,8 @@ export function simStart(state: StartState, now = Date.now()): SimStart {
         : LIBRARY;
   for (const [tag, activityId, ago, plays, minutes] of library) {
     mappings[tag] = activityId;
-    cartridges[tag] = { seenAt: ago === null ? null : iso(now - ago), plays, playedMs: minutes * MIN };
+    const members = Object.hasOwn(CHOSEN, tag) ? CHOSEN[tag] : [];
+    cartridges[tag] = { members, seenAt: ago === null ? null : iso(now - ago), plays, playedMs: minutes * MIN };
   }
 
   const playing = state === "playing";
@@ -133,7 +155,7 @@ export function simStart(state: StartState, now = Date.now()): SimStart {
 
   return {
     mappings,
-    live: playing ? [{ id: "s-1", activityId: "deep-work", startedAt }] : [],
+    live: playing ? [{ id: "s-1", activityId: "deep-work", startedAt, members: CHOSEN[KNOWN_TAGS[0]] }] : [],
     record: {
       ...record,
       devices: {
@@ -144,7 +166,15 @@ export function simStart(state: StartState, now = Date.now()): SimStart {
           boot: 1234,
           seq: 7,
           slot: playing
-            ? { tag: KNOWN_TAGS[0], since: iso(startedAt), activityId: "deep-work", sessionId: "s-1", outcome: "started", error: null }
+            ? {
+                tag: KNOWN_TAGS[0],
+                since: iso(startedAt),
+                activityId: "deep-work",
+                sessionId: "s-1",
+                outcome: "started",
+                error: null,
+                lateFor: null,
+              }
             : null,
           lastHeardAt: iso(now - 2 * MIN),
           hubHost: DEVICE.hubHost,

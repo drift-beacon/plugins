@@ -6,9 +6,11 @@ Based on the cartridge player from [StockPot](https://www.thestockpot.net/cartri
 
 ## How it works
 
-- **Insert to start:** the cartridge's activity starts. If it is already running, the cartridge takes that session over.
-- **Eject to stop:** taking a cartridge out ends only the session it started or took over.
-- **Point activities:** a cartridge for a point activity marks it once when it goes in.
+- **Who a cartridge tracks for:** open a cartridge in the plugin and pick people under **Tracks for**. A newly labelled cartridge tracks for whoever labelled it. If everyone picked leaves the workspace, it tracks for the workspace's owner.
+- **Insert to start:** the cartridge's activity starts for the people it tracks for. If they're all already in a session of that activity, the cartridge takes that session over; otherwise it starts a new one for all of them.
+- **Eject to stop:** taking a cartridge out ends only the session it started or took over, for everyone in it.
+- **Start in the plugin:** with a cartridge in that isn't tracking, Start starts it for the people it tracks for.
+- **Point activities:** a cartridge for a point activity marks it once, for the people it tracks for, when it goes in.
 - **Labelling:** a new cartridge shows up in the plugin as "Seen, not labelled". Pick an activity for it there.
 - **Forgetting:** removes a cartridge's label. Take it out of the player first.
 - **Stats:** plays, time tracked and when each cartridge was last seen.

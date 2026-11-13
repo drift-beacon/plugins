@@ -7,9 +7,22 @@ Lights up Nanoleaf **Shapes** panels (Hexagons, Triangles, Mini Triangles) in th
 - **Live session:** the wall glows in the colour of the activity you are tracking.
 - **Goal progress:** with a goal, panels fill one after another, in an order you choose.
 - **Pinned activity:** when nothing is live, the wall can show a pinned activity and its progress.
-- **Schedules:** when a schedule fires, the wall pulses twice in that activity's colour.
+- **Schedules:** when a schedule for the person it follows fires, the wall pulses twice in that activity's colour.
 - **Other plugins:** Magic Cube can show its faces' colours on the wall while you roll.
 - **Your brightness:** you set the maximum. The wall steps aside when you change it from the Nanoleaf app, HomeKit or Home Assistant.
+
+## Who the wall follows
+
+In a workspace with more than one person, pick the person the wall follows under **This wall follows**. It glows for their sessions, and a touch on the wall acts for them. Until you pick, it follows the workspace's owner.
+
+## Gestures on the wall
+
+You choose what a tap, a double tap or a swipe on the panels does. Each one acts for the person the wall follows:
+
+- **Pause or stop** acts on the session the wall is showing, for everyone in it.
+- **Start an activity** starts it for them. If they're already in a session of it, nothing changes.
+- **Resume** starts the pinned activity again for them.
+- **Pin an activity** pins it for the workspace.
 
 ## What you need
 

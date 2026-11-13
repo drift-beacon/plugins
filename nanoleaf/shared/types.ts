@@ -73,7 +73,7 @@ export interface PlacedLayout {
   readonly bounds: { readonly minX: number; readonly minY: number; readonly maxX: number; readonly maxY: number };
 }
 
-/* ---- Storage (per user and workspace, shared by main and the UI) ---- */
+/* ---- Storage (per workspace, shared by main and every member's UI) ---- */
 
 /**
  * Storage keys and their values:
@@ -81,6 +81,7 @@ export interface PlacedLayout {
  *   layout: Layout | null                  written by main whenever the controller reports a different layout
  *   order: PanelOrder                      written by the UI
  *   settings: Settings                     written by the UI
+ *   zones: Zone[]                          written by the UI (who the wall follows)
  *   handback: Handback | null              written by main while it drives the wall
  * Read them through shared/storage.ts, which validates and fills defaults: values can come from another version.
  */
@@ -89,8 +90,20 @@ export const STORAGE_KEYS = {
   layout: "layout",
   order: "order",
   settings: "settings",
+  zones: "zones",
   handback: "handback",
 } as const;
+
+/**
+ * Who a part of the wall follows (storage `zones`). There is one zone, the whole wall, kept in a list of its own so a
+ * write to it never races a settings edit. `id` is made once and never changes. `member` is the one person chosen,
+ * null when nobody is; who the zone acts for is worked out from it each time (acting-for.ts), and that is never
+ * written back.
+ */
+export interface Zone {
+  readonly id: string;
+  readonly member: string | null;
+}
 
 /**
  * The wall as it was before the plugin took it (storage `handback`, main only), so it can be handed back even after
@@ -214,9 +227,18 @@ export type ActivityGoal =
 export type GoalPeriod = "day" | "week" | "month" | "year";
 
 /**
- * What the plugin reads of an activity. `goal` and `period` arrived in SDK 0.2.2 and `pinned` (the workspace's pin)
- * in 0.3.0: an older Drift Beacon sends none of them, so they are optional here and absent means "no goal, all history,
- * not pinned".
+ * How far an activity has come in its current period, as Drift Beacon counts it (SDK 0.4 `ActivityData.progress`):
+ * every member's ended sessions from the period's start, a running span not counted.
+ */
+export type ActivityProgress =
+  | { readonly type: "duration"; readonly seconds: number }
+  | { readonly type: "count"; readonly count: number };
+
+/**
+ * What the plugin reads of an activity. The SDK types `goal` and `period` optional (a Drift Beacon older than 0.2.2
+ * sent neither), so absent means "no goal, all history". `pinned` is the workspace's pin and `placedBy` the member
+ * who placed it (null for a schedule's pin, or one placed for nobody). `pinned`, `placedBy` and `progress` are always
+ * there on API 0.4; `pinned` stays optional only for the interface's notice about an older app.
  */
 export interface ActivityLike {
   readonly id: string;
@@ -228,14 +250,28 @@ export interface ActivityLike {
   readonly goal?: ActivityGoal | null;
   readonly period?: GoalPeriod | null;
   readonly pinned?: boolean;
+  readonly placedBy: string | null;
+  readonly progress: ActivityProgress;
 }
 
+/** What the plugin reads of a workspace member (SDK 0.4.1 `Member`). */
+export interface MemberLike {
+  readonly id: string;
+  readonly name: string;
+  readonly role: "OWNER" | "MEMBER";
+}
+
+/**
+ * What the plugin reads of a session. `memberIds` is everyone who took part; `currentMemberIds` is who is in a live
+ * span now (empty once it ends, for a point, and for a session nobody is in).
+ */
 export interface SessionLike {
   readonly id: string;
   readonly activityId: string;
   readonly type: "span" | "point";
   readonly status: "live" | "completed";
   readonly memberIds: readonly string[];
+  readonly currentMemberIds: readonly string[];
   readonly startedAt: Date;
   readonly endedAt: Date | null;
 }
@@ -244,7 +280,7 @@ export interface SessionLike {
 export interface GoalProgress {
   readonly goal: ActivityGoal;
   readonly period: GoalPeriod | null;
-  /** Seconds (duration goals) or times (count goals) so far, including the user's live session. */
+  /** Seconds (duration goals) or times (count goals) so far, including the live span the wall shows. */
   readonly current: number;
   /** `goal.seconds` or `goal.count`. */
   readonly target: number;
@@ -297,7 +333,7 @@ export interface ControlInfo extends ControlLease {
 export type Scene = ActivityScene | ControlScene;
 
 /**
- * A controller's effect in place of the user's own scene. It keeps the activity scene's fields at fixed values, so
+ * A controller's effect in place of the workspace's own scene. It keeps the activity scene's fields at fixed values, so
  * code that only reads them (a goal's progress, an activity) finds none; what it shows is `effect`.
  */
 export interface ControlScene {
@@ -316,7 +352,7 @@ export interface ControlScene {
   readonly track: false;
 }
 
-/** What the user's own sessions and pins put on the wall, or nothing. */
+/** What the followed member's live spans and the workspace's pin put on the wall, or nothing. */
 export interface ActivityScene {
   readonly kind: "off" | "live" | "pinned";
   /** Changes whenever something different should show: `off`, `live:<sessionId>`, `pinned:<activityId>`. */
@@ -447,8 +483,8 @@ export interface ConnectionInfo {
  * - `idle`: nothing live or pinned; the wall shows its own scene (or is off).
  * - `live` / `pinned`: showing that scene. `preview`: showing an interface preview.
  * - `control`: another plugin or Home Assistant holds the wall and its effect shows (the `control` state says who).
- * - `paused`: the user switched driving off. `yielded`: someone else changed the wall; waiting for the next change.
- * - `busy`: another user's or workspace's instance of this plugin is driving the same controller.
+ * - `paused`: driving was switched off. `yielded`: someone else changed the wall; waiting for the next change.
+ * - `busy`: another workspace's instance of this plugin is driving the same controller.
  */
 export type OutputMode =
   | "disconnected"

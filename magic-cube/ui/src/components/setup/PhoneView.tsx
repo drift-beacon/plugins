@@ -5,7 +5,7 @@ import { Cube3D } from "./cube/Cube3D";
 import { useCubeEditor } from "./editor";
 import { FaceEditor } from "./face-editor";
 import { LiveIcon } from "./icons";
-import { LightsToggle,ModeEditor,PinTrackSwitch } from "./kit";
+import { LightsToggle,ModeEditor,PinTrackSwitch,RollsFor } from "./kit";
 import { resultFor } from "./live";
 import { LiveOverlay } from "./LiveOverlay";
 import { cubeArt,FACES,faceSlots,isReady,MODES,type Workspace } from "./model";
@@ -41,6 +41,7 @@ export function PhoneView({ ws }: { ws: Workspace }) {
             <span className={ws.active ? "truncate" : "truncate text-default-500"}>{name}</span>
             <ChevronDown size={16} className="shrink-0 text-default-400" />
           </button>
+          <RollsFor members={ws.members} chosen={ws.rollsFor} onToggle={ws.toggleRollsFor} />
           <LightsToggle ws={ws} />
           <PinTrackSwitch ws={ws} className="phone-switch shrink-0" />
         </div>

@@ -1,12 +1,12 @@
 # Magic Cube checks
 
-Run `pnpm test` for mode-to-face resolution and main-runtime tests. The tests exercise real production functions with an in-memory host; they do not contact hardware or a workspace.
+Run `pnpm test` for mode-to-face resolution, main-runtime tests and the interface's Start on a kept roll. The tests exercise real production functions with an in-memory host; they do not contact hardware or a workspace.
 
-With `pnpm dev` running, open `/tests/host.html` for integration checks. This development-only fixture embeds the real `/index.html` entry through the SDK handshake. Its sample data is isolated in browser session storage and is not included in release bundles. It provides controls for an empty collection, many presets, external selection, hardware state changes and a rejected save.
+With `pnpm dev` running, open `/tests/host.html` for integration checks. This development-only fixture embeds the real `/index.html` entry through the SDK handshake. Its sample data is isolated in browser session storage and is not included in release bundles. It provides controls for an empty collection, many presets, external selection, hardware state changes, a rejected save and a workspace of one (its roster is otherwise three members, so the "Rolls are for" picker shows).
 
 Check preset create/rename/duplicate/delete, mode editing, reload persistence, search, save failure rollback, and Hold → Shake → Land → Start/Mark → Discard/Undo. Below 600px wide the phone layout takes over: verify the cube stays pinned under the preset name and Pin/Track while the options scroll, the name opens the preset sheet (load, rename, duplicate, delete, new), tapping a face opens its picker along the bottom, picking the cube up gives it the whole view, and there is no horizontal overflow.
 
-Production data uses one `settings` record containing `presets`, `activePresetId`, `setup` and `autoStartEnabled`. Each preset stores its own setup and Pin/Track value. The main runtime resolves six faces from this setup, including roulette exclusions. `cubeStatus` and `lastRoll` remain separate live records. Previous storage formats are not migrated.
+Production data uses one `settings` record containing `presets`, `activePresetId`, `setup` and `autoStartEnabled`. Each preset stores its own setup and Pin/Track value. The main runtime resolves six faces from this setup, including roulette exclusions. `rollsFor` is its own record: the member ids every roll is for, written only by the UI and never by `selectPreset`. `shared/acting-for.ts` decides who for main and the UI alike: the stored ids still in the workspace, else its owner. An auto-started roll and the plugin's Start both name them; with no roster to name anyone from, main starts nothing and logs a warning, and the UI's Start is disabled. `cubeStatus` and `lastRoll` remain separate live records. Previous storage formats are not migrated.
 
 ## Nanoleaf lights
 

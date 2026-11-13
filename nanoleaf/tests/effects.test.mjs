@@ -217,11 +217,23 @@ test("decideScene: a held lock beats a live session and a pin, unless driving or
     type: "span",
     status: "live",
     memberIds: ["u1"],
+    currentMemberIds: ["u1"],
     startedAt: new Date(T0),
     endedAt: null,
   };
-  const activities = [{ id: "a", name: "a", trackingType: "span", color: "#f0f", iconPath: null, archived: false }];
-  const input = { userId: "u1", activities, sessions: [session], now: T0, control: lease(effect("pulse")) };
+  const activities = [
+    {
+      id: "a",
+      name: "a",
+      trackingType: "span",
+      color: "#f0f",
+      iconPath: null,
+      archived: false,
+      placedBy: null,
+      progress: { type: "duration", seconds: 0 },
+    },
+  ];
+  const input = { activities, sessions: [session], following: ["u1"], now: T0, control: lease(effect("pulse")) };
   const decided = decideScene({ ...input, settings: DEFAULT_SETTINGS });
   assert.equal(decided.kind, "control");
   assert.equal(decided.key, "control:l1");
@@ -237,7 +249,7 @@ test("decideScene: a held lock beats a live session and a pin, unless driving or
 
 const frameOf = (state, t) => [...renderFrame(state, ORDER, t).values()];
 
-test("a controller's effect swaps in over the user's scene and back out, each frame continuous", () => {
+test("a controller's effect swaps in over the workspace's scene and back out, each frame continuous", () => {
   const settled = T0 + 10_000;
   let state = initialRenderState(liveScene, T0);
   const before = frameOf(state, settled);

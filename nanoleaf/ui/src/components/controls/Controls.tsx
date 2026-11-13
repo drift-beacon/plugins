@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { GESTURES, resolveGesture } from "../../../../shared/gestures.ts";
 import type { GestureAction, TouchGesture } from "../../../../shared/types.ts";
 import { useDrafting } from "../../hooks/useDrawnLight.ts";
-import { type NanoleafModel, useModel } from "../../model.ts";
+import { followingOf, type NanoleafModel, useModel } from "../../model.ts";
 import { EASE_OUT } from "../../motion.ts";
 import { SwitchRow } from "../SwitchRow.tsx";
 import { ActionPicker } from "./ActionPicker.tsx";
@@ -53,7 +53,9 @@ function GestureTile({ gesture, model }: { gesture: TouchGesture; model: Nanolea
         const glow = scope.current?.querySelector<HTMLElement>("[data-glow]");
         const glyph = scope.current?.querySelector<HTMLElement>("[data-glyph]");
         if (!scope.current || !glow || !glyph) return;
-        const step = resolveGesture(m.settings.gestureActions[gesture], m.userId, m.activities, m.sessions);
+        const resolved = resolveGesture(m.settings.gestureActions[gesture], m.activities, m.sessions, followingOf(m));
+        // Main starts nothing for nobody (no roster), so that does nothing here either.
+        const step = resolved?.kind === "track" && resolved.members.length === 0 ? null : resolved;
         const activity = step ? m.activities.find((a) => a.id === step.activityId) : undefined;
         glow.style.background = step
           ? (activity?.color ?? "hsl(var(--heroui-primary))")

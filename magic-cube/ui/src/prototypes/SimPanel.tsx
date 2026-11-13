@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { FACES } from "./modes/model";
+import { setOneMember, useRoster } from "./modes/roster";
 import { type CubeState, fireSim, onSimState, type SimAction } from "./modes/sim";
 import "./sim-panel.css";
 
@@ -20,6 +21,7 @@ export function SimPanel({ initialOpen }: { initialOpen?: boolean } = {}) {
   const [state, setState] = useState<CubeState>("idle");
   // On a phone-sized window the panel starts folded so it doesn't cover the layout; the keys work either way.
   const [open, setOpen] = useState(() => initialOpen ?? window.innerWidth >= 640);
+  const roster = useRoster();
   useEffect(() => onSimState(setState), []);
 
   useEffect(() => {
@@ -73,6 +75,11 @@ export function SimPanel({ initialOpen }: { initialOpen?: boolean } = {}) {
                 {f}
               </button>
             ))}
+          </div>
+          <div className="sim-panel-row">
+            <button className="sim-panel-btn" aria-pressed={roster.oneMember} onClick={() => setOneMember(!roster.oneMember)}>
+              {roster.oneMember ? "One member · show three" : "Three members · show one"}
+            </button>
           </div>
         </>
       )}

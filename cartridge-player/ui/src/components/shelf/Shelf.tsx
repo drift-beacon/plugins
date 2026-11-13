@@ -104,7 +104,7 @@ export function Shelf({ stageTag, readOnly, phone, heard }: { stageTag: string |
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
           <h2 ref={heading} id="cp-shelf" tabIndex={-1} className="text-lg font-semibold">
-            Your cartridges
+            Cartridges
           </h2>
           <p className="text-sm text-default-500">
             {library.length ? `${count(library.length, "cartridge")} labelled` : "None labelled yet"}

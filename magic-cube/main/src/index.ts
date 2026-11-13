@@ -1,9 +1,10 @@
+import { actingFor } from "../../shared/acting-for";
 import { facePalette, type PaletteSource } from "../../shared/palette";
 import { mappingsForSetup } from "../../shared/setup";
 import { definePlugin, type MainContext, PluginError } from "@drift-beacon/plugin";
 import { createLights, type LightEffect } from "./lights";
 import type { CubePreset, CubeSettings, CubeStatusState, FaceMappings, LastRollState } from "./storage";
-import { emptySettings, UNCATEGORIZED_ID } from "./storage";
+import { emptySettings, readRollsFor, UNCATEGORIZED_ID } from "./storage";
 
 type Context = MainContext;
 
@@ -15,7 +16,7 @@ type Context = MainContext;
  */
 export default definePlugin({
   onStart(ctx) {
-    // One instance per user and workspace, so the cube's state lives here, not at module scope.
+    // One instance per workspace, so the cube's state lives here, not at module scope.
     let state: CubeStatusState["state"] = "idle";
     const lights = createLights({
       nanoleaf: ctx.plugins.get("nanoleaf"),
@@ -143,6 +144,9 @@ function resolveActivityId(ctx: Context, faceMappings: FaceMappings, side: numbe
  * Save the roll and, with auto-start on, track what it picked. The roll is saved as auto-started straight away, so the
  * UI shows it without waiting for the server; if tracking fails, it's saved again waiting for a manual start. Answers
  * the picked activity's colour, for the lights' reveal; null when the face picked nothing.
+ *
+ * The cube can't tell who rolled it, so a tracked roll is for the members the UI picked (`rollsFor`), or the owner.
+ * With nobody to name (no roster from the hub), it starts nothing and waits for a manual start.
  */
 function recordRoll(ctx: Context, side: number): string | null {
   const settings = ctx.storage.get<CubeSettings>("settings") ?? emptySettings();
@@ -150,7 +154,11 @@ function recordRoll(ctx: Context, side: number): string | null {
   const autoStartEnabled = settings.autoStartEnabled;
   const activityId = resolveActivityId(ctx, faceMappings, side);
   const activity = activityId ? ctx.activities.get(activityId) : undefined;
-  const autoStart = autoStartEnabled && activity !== undefined;
+  const members = autoStartEnabled && activity ? actingFor(readRollsFor(ctx.storage.get("rollsFor")), ctx.members ?? []) : [];
+  if (autoStartEnabled && activity && members.length === 0) {
+    ctx.log.warn("Not starting the roll: the hub sent no workspace members, so there is nobody to start it for");
+  }
+  const autoStart = autoStartEnabled && activity !== undefined && members.length > 0;
 
   const roll: LastRollState = {
     side,
@@ -164,7 +172,7 @@ function recordRoll(ctx: Context, side: number): string | null {
   ctx.events.emit("rolled", peerRoll(ctx, roll));
 
   if (autoStart) {
-    void activity.track().then(session => {
+    void activity.track({ members }).then(session => {
       if (ctx.storage.get<LastRollState>("lastRoll")?.timestamp === roll.timestamp) saveRoll(ctx, { ...roll, sessionId: session.id });
     }).catch((error: unknown) => {
       ctx.log.error("Failed to auto-start activity", error);

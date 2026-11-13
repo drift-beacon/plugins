@@ -1,5 +1,6 @@
 import { blankSetup, mappingsForSetup } from "../shared/setup.ts";
-import { emptySettings } from "../shared/storage.ts";
+import { emptySettings, readRollsFor } from "../shared/storage.ts";
+import * as actingFor from "../shared/acting-for.ts";
 import * as palette from "../shared/palette.ts";
 import * as lights from "../main/src/lights.ts";
 import assert from 'node:assert/strict';
@@ -10,24 +11,28 @@ const require = createRequire(new URL('../package.json', import.meta.url));
 const ts = require('typescript');
 const code = ts.transpileModule(readFileSync(new URL('../main/src/index.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 const exports = {};
-const local = { './storage': { UNCATEGORIZED_ID: 'uncategorized', emptySettings }, '../../shared/setup': { mappingsForSetup }, '../../shared/palette': palette, './lights': lights };
+const local = { './storage': { UNCATEGORIZED_ID: 'uncategorized', emptySettings, readRollsFor }, '../../shared/setup': { mappingsForSetup }, '../../shared/palette': palette, '../../shared/acting-for': actingFor, './lights': lights };
 new Function('require','exports',code)(id => local[id] ?? require(id), exports);
 const cleanups = [];
 afterEach(async () => {
   await Promise.all(cleanups.splice(0).map(stop => stop()));
 });
-function host(initial = {}) {
+/** `members` is the workspace's roster; given as undefined, the hub sent none. */
+function host(initial = {}, options = {}) {
+  const members = 'members' in options ? options.members : [{ id:'sam', role:'OWNER' }];
   const data = new Map(Object.entries(initial)), commands = {}, state = new Map(); let receive, changed = () => {};
-  const tracked = [], lit = [], stops = [];
-  const activities = [{ id:'included', archived:false, color:'#ff0000', track:async () => { tracked.push('included'); return { id:'session-1' }; } }, { id:'excluded', archived:false, color:'#00ff00' }];
+  // `tracked` is each start's activity, `trackOptions` what it was asked to name, and `warnings` what main warned.
+  const tracked = [], trackOptions = [], lit = [], stops = [], warnings = [];
+  let started = 0;
+  const activities = [{ id:'included', archived:false, color:'#ff0000', track:async (...args) => { tracked.push('included'); trackOptions.push(args); return { id:`session-${++started}` }; } }, { id:'excluded', archived:false, color:'#00ff00' }];
   const categories = [{ id:'work', color:'#0000ff' }];
   // The Nanoleaf plugin as the cube reaches it: every command it runs is recorded, and takeControl grants a lease.
   const nanoleaf = { command: async (name, input) => { lit.push([name, input]); return name === 'takeControl' ? { granted:true, leaseId:'lease-1' } : { released:true }; } };
-  const ctx = { config:{ mqttTopic:'cube' }, log:{ info(){},warn(){},error(){} }, state:{ set:(k,v)=>state.set(k,v) }, events:{ emit(){} }, commands:{ handle:(k,f)=>commands[k]=f }, storage:{ get:k=>data.get(k), set:async (k,v)=>{data.set(k,v)}, onChange(fn){ changed = fn; } }, activities:{ get:id=>activities.find(a=>a.id===id), list:()=>activities }, categories:{ get:id=>categories.find(c=>c.id===id) }, plugins:{ get:() => nanoleaf }, onStop:fn=>stops.push(fn), mqtt:{subscribe:(_,fn)=>receive=fn} };
+  const ctx = { config:{ mqttTopic:'cube' }, log:{ info(){},warn:(...args)=>warnings.push(args),error(){} }, state:{ set:(k,v)=>state.set(k,v) }, events:{ emit(){} }, commands:{ handle:(k,f)=>commands[k]=f }, storage:{ get:k=>data.get(k), set:async (k,v)=>{data.set(k,v)}, onChange(fn){ changed = fn; } }, activities:{ get:id=>activities.find(a=>a.id===id), list:()=>activities }, members, categories:{ get:id=>categories.find(c=>c.id===id) }, plugins:{ get:() => nanoleaf }, onStop:fn=>stops.push(fn), mqtt:{subscribe:(_,fn)=>receive=fn} };
   exports.default.onStart(ctx);
   const stop = () => Promise.all(stops.map(fn => fn()));
   cleanups.push(stop);
-  return { data, commands, state, tracked, lit, send:(action,side)=>receive({payload:JSON.stringify({action,side})}),
+  return { data, commands, state, tracked, trackOptions, warnings, lit, send:(action,side)=>receive({payload:JSON.stringify({action,side})}),
     /** A settings write from the UI, as main hears it. */
     write(settings){ data.set('settings', settings); changed('settings'); },
     stop };
@@ -70,6 +75,56 @@ test('hardware roulette honors exclusions and associates the actual tracking ses
   await new Promise(resolve=>setImmediate(resolve));
   assert.deepEqual(h.tracked,['included']); assert.equal(h.data.get('lastRoll').activityId,'included');
   assert.equal(h.data.get('lastRoll').sessionId,'session-1'); assert.equal(h.data.get('lastRoll').startMode,'auto');
+});
+
+/* ---- Who a tracked roll is for ---- */
+const autoRoulette = () => { const setup=blankSetup('roulette'); setup.roulette='work'; setup.rouletteOff={work:['excluded']}; return { ...emptySettings(), setup, autoStartEnabled:true }; };
+const roll = async h => { h.send('hold'); h.send('shake'); h.send('side_up',1); await new Promise(resolve=>setImmediate(resolve)); };
+const household = [{ id:'sam', role:'MEMBER' }, { id:'jo', role:'OWNER' }, { id:'kim', role:'MEMBER' }];
+
+test('a roll is for the members picked in rollsFor, in their stored order', async () => {
+  const h=host({settings:autoRoulette(),rollsFor:['kim','sam']},{ members:household });
+  await roll(h);
+  assert.deepEqual(h.trackOptions,[[{members:['kim','sam']}]]);
+  assert.equal(h.data.get('lastRoll').startMode,'auto');
+});
+test('someone picked who has left the workspace is dropped from the roll', async () => {
+  const h=host({settings:autoRoulette(),rollsFor:['gone','sam']},{ members:household });
+  await roll(h);
+  assert.deepEqual(h.trackOptions,[[{members:['sam']}]]);
+});
+test('with nobody picked, or only people who have left, a roll is for the owner', async () => {
+  const none=host({settings:autoRoulette()},{ members:household });
+  await roll(none);
+  const left=host({settings:autoRoulette(),rollsFor:['gone']},{ members:household });
+  await roll(left);
+  assert.deepEqual([...none.trackOptions,...left.trackOptions],[[{members:['jo']}],[{members:['jo']}]]);
+  // The owner stand-in is never written back.
+  assert.equal(none.data.has('rollsFor'),false); assert.deepEqual(left.data.get('rollsFor'),['gone']);
+});
+test('a change to rollsFor applies to the next roll', async () => {
+  const h=host({settings:autoRoulette(),rollsFor:['sam']},{ members:household });
+  await roll(h);
+  h.data.set('rollsFor',['kim']);
+  await roll(h);
+  assert.deepEqual(h.trackOptions,[[{members:['sam']}],[{members:['kim']}]]);
+});
+test('with no roster from the hub, a roll starts nothing, waits for a manual start and warns once', async () => {
+  const h=host({settings:autoRoulette(),rollsFor:['sam']},{ members:[] });
+  await roll(h);
+  assert.deepEqual(h.trackOptions,[]);
+  assert.equal(h.data.get('lastRoll').activityId,'included'); assert.equal(h.data.get('lastRoll').startMode,null);
+  assert.equal(h.warnings.length,1);
+  // A hub that sends no members at all.
+  const absent=host({settings:autoRoulette()},{ members:undefined });
+  await roll(absent);
+  assert.deepEqual(absent.trackOptions,[]); assert.equal(absent.warnings.length,1);
+});
+test('selectPreset leaves rollsFor alone', async () => {
+  const preset={id:'p',name:'Focus',setup:blankSetup('duel'),autoStartEnabled:true};
+  const h=host({settings:{...emptySettings(),presets:[preset]},rollsFor:['kim']},{ members:household });
+  await h.commands.selectPreset({preset:'Focus'}); await h.commands.selectPreset({preset:null});
+  assert.deepEqual(h.data.get('rollsFor'),['kim']);
 });
 test('Pin leaves the roll waiting without starting a session', async () => {
   const setup=blankSetup();setup.manual['2']={type:'activity',id:'included'};

@@ -1,6 +1,8 @@
 /**
- * What the wall should show, before any animation: the user's live session, else their pinned activity, else nothing.
- * Main and the UI both call `decideScene` on the same data, so the interface's preview matches the wall.
+ * What the wall should show, before any animation: the newest live span the member the wall follows is in, else the
+ * workspace's pin, else nothing. Main and the UI both call `decideScene` on the same data and the same members, so the
+ * interface's preview matches the wall whoever is viewing it, except near a goal period's edge: the hub and the device
+ * count goal progress in their own time zones.
  */
 import { cssRgb, parseColor, toLedRgb, WARM_WHITE } from "./color.ts";
 import { goalProgress } from "./progress.ts";
@@ -32,18 +34,19 @@ export const OFF_SCENE: ActivityScene = Object.freeze({
 
 /** Everything `decideScene` reads. `now` is a `Date` or epoch ms. */
 export interface SceneInput {
-  readonly userId: string;
   /** Every activity, archived included: a live session of an archived activity still glows; archived pins don't. */
   readonly activities: readonly ActivityLike[];
   /** Every session in the workspace; order doesn't matter. */
   readonly sessions: readonly SessionLike[];
+  /** Who the wall follows: `actingFor` of its zone's member (acting-for.ts), a list of one. Empty follows nobody. */
+  readonly following: readonly string[];
   readonly settings: Settings;
   readonly now: Date | number;
   /** The lock a controller holds on the wall, if one does: main's lease, or the published `control` state in the UI. */
   readonly control?: ControlLease | null;
 }
 
-/** A held lock as a scene: the controller's effect in place of the user's own. */
+/** A held lock as a scene: the controller's effect in place of the workspace's own scene. */
 export function controlScene(control: ControlLease): ControlScene {
   const effect = control.effect;
   const rgb = effect.color ?? effect.colors[0] ?? WARM_WHITE;
@@ -67,22 +70,19 @@ function ledColor(activity: ActivityLike): Rgb {
 }
 
 /**
- * Decides the scene: off when disabled; else a controller's effect while one holds the wall and the user allows it;
- * else the user's newest live span whose activity exists, archived or not, as core's live-activity slot shows it
- * (live, full level); else the first non-archived activity the user pinned (pinned level and style); else off.
+ * The live span the wall shows: the newest live span the member in `following` is in now (`currentMemberIds`), whose
+ * activity exists, archived or not (as core's live-activity slot shows it). Null when there is none: a span they
+ * aren't in doesn't light the wall.
  */
-/**
- * The user's live session the wall shows: their newest live span whose activity exists, archived or not (as core's
- * live-activity slot shows it). Null when there is none.
- */
-export function liveFor(
-  userId: string,
+export function shownLive(
   activities: readonly ActivityLike[],
   sessions: readonly SessionLike[],
+  following: readonly string[],
 ): { readonly session: SessionLike; readonly activity: ActivityLike } | null {
   let found: { session: SessionLike; activity: ActivityLike } | null = null;
   for (const s of sessions) {
-    if (s.status !== "live" || s.type !== "span" || !s.memberIds.includes(userId)) continue;
+    if (s.status !== "live" || s.type !== "span") continue;
+    if (!s.currentMemberIds.some((id) => following.includes(id))) continue;
     if (found && s.startedAt.getTime() <= found.session.startedAt.getTime()) continue;
     const activity = activities.find((a) => a.id === s.activityId);
     if (activity) found = { session: s, activity };
@@ -99,12 +99,17 @@ export function pinnedFor(activities: readonly ActivityLike[]): ActivityLike | n
   return activities.find((a) => !a.archived && a.pinned === true) ?? null;
 }
 
-export function decideScene({ userId, activities, sessions, settings, now, control }: SceneInput): Scene {
+/**
+ * Decides the scene: off when disabled; else a controller's effect while one holds the wall and the setting allows it;
+ * else the live span `shownLive` picks (live, full level); else the workspace's pin, if its activity isn't archived
+ * (pinned level and style); else off.
+ */
+export function decideScene({ activities, sessions, following, settings, now, control }: SceneInput): Scene {
   if (!settings.enabled) return OFF_SCENE;
   if (control && settings.allowControl) return controlScene(control);
   const at = typeof now === "number" ? now : now.getTime();
 
-  const shown = liveFor(userId, activities, sessions);
+  const shown = shownLive(activities, sessions, following);
   if (shown) {
     const { session: live, activity: liveActivity } = shown;
     return {
@@ -113,7 +118,7 @@ export function decideScene({ userId, activities, sessions, settings, now, contr
       activityId: liveActivity.id,
       cssColor: liveActivity.color,
       rgb: ledColor(liveActivity),
-      progress: goalProgress(liveActivity, sessions, userId, at),
+      progress: goalProgress(liveActivity, live, at),
       level: 1,
       style: "glow",
       track: settings.track,
@@ -128,7 +133,7 @@ export function decideScene({ userId, activities, sessions, settings, now, contr
       activityId: pinned.id,
       cssColor: pinned.color,
       rgb: ledColor(pinned),
-      progress: settings.pinnedProgress ? goalProgress(pinned, sessions, userId, at) : null,
+      progress: settings.pinnedProgress ? goalProgress(pinned, null, at) : null,
       // Dimmed by the wall's brightness instead (main drives a pin at `pinnedBrightness`).
       level: 1,
       style: settings.pinnedStyle,

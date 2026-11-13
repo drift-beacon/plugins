@@ -1,12 +1,13 @@
 import { useState } from "react";
+import { actingFor,toggleMember } from "../../../../shared/acting-for";
 import { blankSetup,type ModeId,type ModeState } from "../../../../shared/setup";
 import { saveStorage,useDriftBeacon } from "../../drift-beacon";
-import { emptySettings,type CubePreset,type CubeSettings } from "../../storage";
+import { emptySettings,readRollsFor,type CubePreset,type CubeSettings } from "../../storage";
 
 export interface Preset { id: string; name: string; setup: ModeState; autoStart: boolean }
 const viewPreset = (p: CubePreset): Preset => ({ id: p.id, name: p.name, setup: p.setup, autoStart: p.autoStartEnabled });
 
-/** Whether the Nanoleaf plugin (manifest.json `uses`) is installed for this user: an app that can't say counts as no. */
+/** Whether the Nanoleaf plugin (manifest.json `uses`) is installed in this workspace: an app that can't say counts as no. */
 function nanoleafHere(ctx: ReturnType<typeof useDriftBeacon>): boolean {
   try { return ctx.plugins.get("nanoleaf").status.state !== "not-installed"; }
   catch { return false; }
@@ -21,6 +22,8 @@ export function useWorkspace() {
   const nanoleaf = nanoleafHere(ctx);
   const { activePresetId: activeId, setup, autoStartEnabled: autoStart } = settings;
   const presets = settings.presets.map(viewPreset);
+  const members = ctx.members;
+  const rollsFor = actingFor(readRollsFor(ctx.storage.get("rollsFor")), members);
 
   async function write(next: CubeSettings) {
     setError(null);
@@ -50,6 +53,17 @@ export function useWorkspace() {
     nanoleaf,
     lightNanoleaf: settings.lightNanoleaf !== false,
     setLightNanoleaf(value: boolean) { return write({ ...current(), lightNanoleaf: value }); },
+    /** The workspace's members, and who every roll is for: its own record, not part of a preset. */
+    members,
+    rollsFor,
+    /** Tick or untick one member; false when that would leave nobody. */
+    toggleRollsFor(id: string) {
+      const next = toggleMember(actingFor(readRollsFor(ctx.storage.get("rollsFor")), ctx.members), id);
+      if (!next) return false;
+      setError(null);
+      saveStorage({ rollsFor: next }).catch((e: unknown) => setError(e instanceof Error ? e.message : "Could not save the change. Please try again."));
+      return true;
+    },
     select(id: string | null) {
       const cur = current();
       if (!id) return write({ ...cur, activePresetId: null });

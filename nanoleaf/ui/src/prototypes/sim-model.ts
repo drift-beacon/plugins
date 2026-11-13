@@ -3,9 +3,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DEFAULT_PERIOD_MS, REVEAL_MS } from "../../../shared/effects.ts";
 import { addressKind, lanProblem } from "../../../shared/lan.ts";
 import { decideScene } from "../../../shared/scene.ts";
-import { DEFAULT_ORDER, DEFAULT_SETTINGS, readSettings } from "../../../shared/storage.ts";
+import { DEFAULT_ORDER, DEFAULT_SETTINGS, readSettings, zonesFollowing } from "../../../shared/storage.ts";
 import type {
-  ActivityLike,
   ConnectionInfo,
   ConnectionStatus,
   ControlEffectType,
@@ -17,10 +16,18 @@ import type {
   SessionLike,
   Settings,
   TouchGesture,
+  Zone,
 } from "../../../shared/types.ts";
 import { useNow } from "../hooks/useNow.ts";
-import type { ControllerChange, MainStatus, NanoleafModel, PreviewRequest } from "../model.ts";
 import {
+  type ControllerChange,
+  followingOf,
+  type MainStatus,
+  type NanoleafModel,
+  type PreviewRequest,
+} from "../model.ts";
+import {
+  type ActivityFixture,
   activitiesFor,
   CONTROLLERS,
   FOUND,
@@ -29,12 +36,14 @@ import {
   layoutFor,
   liveSpan,
   ME,
+  MEMBERS,
   nextSessionId,
   PLAIN_ACTIVITY,
   type SimController,
   sessionsFor,
   sortSessions,
   type StartState,
+  withProgress,
 } from "./fixtures.ts";
 
 /*
@@ -58,7 +67,8 @@ export type SimAction =
   | { type: "busy" }
   | { type: "main" }
   | { type: "elsewhere" }
-  | { type: "old-app" };
+  | { type: "old-app" }
+  | { type: "one-member" };
 
 const ACTION_EVENT = "nanoleaf-sim";
 const STATE_EVENT = "nanoleaf-sim-state";
@@ -94,9 +104,13 @@ interface Lease {
 }
 
 interface SimState {
-  readonly activities: readonly ActivityLike[];
+  readonly activities: readonly ActivityFixture[];
   readonly sessions: readonly SessionLike[];
   readonly settings: Settings;
+  /** Who the wall follows, as stored: nothing at first, so it follows the owner. */
+  readonly zones: readonly Zone[];
+  /** A workspace of one (its owner) in place of the three-member roster. */
+  readonly oneMember: boolean;
   readonly order: PanelOrder;
   readonly controller: SimController | null;
   readonly layout: Layout | null;
@@ -147,6 +161,8 @@ function initialState(layoutKey: LayoutKey | null, options: SimOptions, now: num
     activities: activitiesFor(options.start),
     sessions: sessionsFor(options.start, now),
     settings: DEFAULT_SETTINGS,
+    zones: [],
+    oneMember: false,
     order: DEFAULT_ORDER,
     controller,
     layout: layoutKey ? layoutFor(layoutKey) : null,
@@ -163,7 +179,7 @@ function initialState(layoutKey: LayoutKey | null, options: SimOptions, now: num
 }
 
 /** The rows an older app sends: no goal, period or pinned at all. */
-function withoutGoals(activities: readonly ActivityLike[]): ActivityLike[] {
+function withoutGoals(activities: readonly ActivityFixture[]): ActivityFixture[] {
   return activities.map(({ goal: _goal, period: _period, pinned: _pinned, ...rest }) => rest);
 }
 
@@ -208,7 +224,7 @@ function outputOf(s: SimState, scene: Scene, now: number): Omit<OutputInfo, "sin
   const quiet = { activityId: null, fraction: null, inControl: false, detail: null };
   if (!s.controller || s.connection.status !== "connected") return { ...quiet, mode: "disconnected" };
   if (!s.settings.enabled) return { ...quiet, mode: "paused" };
-  if (s.busy) return { ...quiet, mode: "busy", detail: "Another Drift Beacon user is driving this wall" };
+  if (s.busy) return { ...quiet, mode: "busy", detail: "Another Drift Beacon workspace is driving this controller" };
   const fraction = scene.progress ? round3(Math.min(Math.max(scene.progress.fraction, 0), 1.5)) : null;
   const lease = s.lease && s.lease.until > now && s.lease.preview.mode !== "none" ? s.lease : null;
   if (lease) {
@@ -301,20 +317,22 @@ export function useSimModel(layoutKey: LayoutKey | null, options: SimOptions): N
   }, [update]);
 
   const activities = useMemo(
-    () => (state.oldApp ? withoutGoals(state.activities) : state.activities),
-    [state.activities, state.oldApp],
+    () => withProgress(state.oldApp ? withoutGoals(state.activities) : state.activities, state.sessions, Date.now()),
+    [state.activities, state.sessions, state.oldApp],
   );
+  const members = useMemo(() => (state.oneMember ? MEMBERS.slice(0, 1) : MEMBERS), [state.oneMember]);
+  const following = useMemo(() => followingOf({ members, zones: state.zones }), [members, state.zones]);
   const scene = useMemo(
     () =>
       decideScene({
-        userId: ME,
         activities,
         sessions: state.sessions,
+        following,
         settings: state.settings,
         now: new Date(now),
         control: state.control,
       }),
-    [activities, state.sessions, state.settings, now, state.control],
+    [activities, state.sessions, following, state.settings, now, state.control],
   );
   const sceneRef = useRef(scene);
   sceneRef.current = scene;
@@ -429,6 +447,9 @@ export function useSimModel(layoutKey: LayoutKey | null, options: SimOptions): N
       },
       async saveOrder(order) {
         update((s) => ({ ...s, order }));
+      },
+      async saveZoneMember(member) {
+        update((s) => ({ ...s, zones: zonesFollowing(s.zones, member) }));
       },
       async discover(_timeoutMs, signal) {
         requireMain();
@@ -554,8 +575,8 @@ export function useSimModel(layoutKey: LayoutKey | null, options: SimOptions): N
           });
           break;
         case "archive": {
-          // Someone archives (or restores) the activity the user is live on: its session keeps the wall lit.
-          const live = s.sessions.find((x) => x.status === "live" && x.memberIds.includes(ME));
+          // Someone archives (or restores) the activity live on the wall: its session keeps the wall lit.
+          const live = s.sessions.find((x) => x.status === "live");
           const id = live?.activityId ?? GOAL_ACTIVITY;
           update((x) => ({
             ...x,
@@ -637,6 +658,9 @@ export function useSimModel(layoutKey: LayoutKey | null, options: SimOptions): N
         case "old-app":
           update((x) => ({ ...x, oldApp: !x.oldApp }));
           break;
+        case "one-member":
+          update((x) => ({ ...x, oneMember: !x.oneMember }));
+          break;
       }
     };
     const onAction = (e: Event) => handle((e as CustomEvent<SimAction>).detail);
@@ -661,10 +685,11 @@ export function useSimModel(layoutKey: LayoutKey | null, options: SimOptions): N
 
   return useMemo<NanoleafModel>(
     () => ({
-      userId: ME,
       activities,
       sessions: state.sessions,
       settings: state.settings,
+      members,
+      zones: state.zones,
       order: state.order,
       layout: state.layout,
       controller,
@@ -680,7 +705,19 @@ export function useSimModel(layoutKey: LayoutKey | null, options: SimOptions): N
       onControllerChanged,
       onResync,
     }),
-    [activities, state, controller, running, down, stableOutput, actions, onTouch, onControllerChanged, onResync],
+    [
+      activities,
+      state,
+      members,
+      controller,
+      running,
+      down,
+      stableOutput,
+      actions,
+      onTouch,
+      onControllerChanged,
+      onResync,
+    ],
   );
 }
 
@@ -698,10 +735,10 @@ function unreachable(controller: SimController, retryInS: number): ConnectionInf
   });
 }
 
-/** The user's live spans, ended now. */
+/** The workspace's live spans, ended now. */
 function endLive(sessions: readonly SessionLike[], now: number): SessionLike[] {
   return sessions.map((x) =>
-    x.status === "live" && x.memberIds.includes(ME) ? { ...x, status: "completed", endedAt: new Date(now) } : x,
+    x.status === "live" ? { ...x, status: "completed", currentMemberIds: [], endedAt: new Date(now) } : x,
   );
 }
 
@@ -713,7 +750,7 @@ function addProgress(s: SimState, scene: Scene, now: number): SessionLike[] {
   if (!activity || !goal) return [...s.sessions];
   if (goal.type === "duration") {
     const ms = goal.seconds * 100;
-    const live = s.sessions.find((x) => x.activityId === id && x.status === "live" && x.memberIds.includes(ME));
+    const live = s.sessions.find((x) => x.activityId === id && x.status === "live");
     if (live) {
       return s.sessions.map((x) => (x === live ? { ...x, startedAt: new Date(x.startedAt.getTime() - ms) } : x));
     }
@@ -725,6 +762,7 @@ function addProgress(s: SimState, scene: Scene, now: number): SessionLike[] {
         type: "span",
         status: "completed",
         memberIds: [ME],
+        currentMemberIds: [],
         startedAt: new Date(now - ms - MIN),
         endedAt: new Date(now - MIN),
       },
@@ -737,6 +775,7 @@ function addProgress(s: SimState, scene: Scene, now: number): SessionLike[] {
     type: activity.trackingType,
     status: "completed",
     memberIds: [ME],
+    currentMemberIds: [],
     startedAt: new Date(now - (i + 1) * 20 * MIN),
     endedAt: activity.trackingType === "span" ? new Date(now - (i + 1) * 20 * MIN + 15 * MIN) : null,
   }));

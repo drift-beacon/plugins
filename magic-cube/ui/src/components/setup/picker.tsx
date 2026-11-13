@@ -177,7 +177,7 @@ export function PickerPanel({ value, onSelect, onClose, exclude = [], categories
 }
 
 // HeroUI animates the panel with these variants: out of the trigger (its placement sets the origin), fast out.
-const POP_MOTION = {
+export const POP_MOTION = {
   variants: {
     enter: { opacity: 1, scale: 1, transition: { duration: 0.18, ease: EASE_OUT } },
     exit: { opacity: 0, scale: 0.96, transition: { duration: 0.12, ease: EASE_OUT } },

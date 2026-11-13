@@ -1,7 +1,8 @@
 import { useRef,useState } from "react";
+import { actingFor } from "../../../../shared/acting-for";
 import { saveStorage,useDriftBeacon } from "../../drift-beacon";
 import { useCubeViewState,type ViewState } from "../../hooks/useCubeViewState";
-import type { CubeSettings,CubeStatusState,LastRollState } from "../../storage";
+import { readRollsFor,type CubeSettings,type CubeStatusState,type LastRollState } from "../../storage";
 import { activityById,categoryById,type CatalogActivity } from "./catalog";
 import { drawPool,FACES,faceSlots,type Face,type FaceSlot,type Workspace } from "./model";
 
@@ -18,6 +19,8 @@ export interface Roll {
   auto: boolean;
   discarded: boolean;
   canDiscard: boolean;
+  /** Start or Mark has someone to name: false only with no roster from the app. */
+  canStart: boolean;
 }
 
 /** Present only rolls received from the real runtime; all tracking actions go through the SDK. */
@@ -31,6 +34,8 @@ export function useCubeRuntime(ws: Workspace) {
   const pending = useRef(false);
   const [discarded, setDiscarded] = useState<string | null>(null);
   const raw = transientRoll;
+  // Who a Start pressed here is for: the same members a roll is for.
+  const members = actingFor(readRollsFor(ctx.storage.get("rollsFor")), ctx.members);
   let roll: Roll | null = null;
   if (raw && FACES.includes(String(raw.side) as Face)) {
     const face = String(raw.side) as Face;
@@ -47,7 +52,9 @@ export function useCubeRuntime(ws: Workspace) {
       at: Date.parse(raw.timestamp), auto: raw.startMode === "auto",
       tracked: activity && raw.startMode ? { kind: activity.trackingType, at: session?.startedAt.getTime() ?? Date.parse(raw.timestamp) } : null,
       discarded: discarded === raw.timestamp,
-      canDiscard: !!session?.isMine && (session.isLive || session.isPoint),
+      // The roll's own session: anyone in the workspace may throw it away, as in the app.
+      canDiscard: !!session?.exists && (session.isLive || session.isPoint),
+      canStart: members.length > 0,
     };
   }
   async function action(fn: () => Promise<void>) {
@@ -58,12 +65,12 @@ export function useCubeRuntime(ws: Workspace) {
     finally { pending.current = false; setBusy(false); }
   }
   function track() {
-    if (!raw?.activityId || raw.startMode) return;
+    if (!raw?.activityId || raw.startMode || members.length === 0) return;
     const target = raw;
     void action(async () => {
       const activity = ctx.activities.get(target.activityId!);
       if (!activity || activity.archived) throw new Error("This activity is no longer available.");
-      const session = await activity.track();
+      const session = await activity.track({ members });
       if (ctx.storage.get<LastRollState>("lastRoll")?.timestamp === target.timestamp) {
         await saveStorage({ lastRoll: { ...target, startMode: "manual", sessionId: session.id } });
       }
@@ -74,7 +81,7 @@ export function useCubeRuntime(ws: Workspace) {
     const target = raw;
     void action(async () => {
       const session = ctx.sessions.get(target.sessionId!);
-      if (!session?.isMine) throw new Error("This session is no longer available.");
+      if (!session?.exists) throw new Error("This session is no longer available.");
       await session.discard();
       setDiscarded(target.timestamp);
     });

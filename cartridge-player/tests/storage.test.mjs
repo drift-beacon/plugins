@@ -33,6 +33,7 @@ const slot = (tag, fields = {}) => ({
   sessionId: "s1",
   outcome: "started",
   error: null,
+  lateFor: null,
   ...fields,
 });
 
@@ -92,7 +93,7 @@ test("player record: each bad field falls back on its own, and lists keep their 
   assert.equal(record.active, null, "active points at a known device or nowhere");
   assert.equal(record.unknown.length, LIMITS.unknown);
   assert.equal(new Set(record.unknown.map((item) => item.tag)).size, record.unknown.length, "no duplicates");
-  assert.deepEqual(record.cartridges, { "04:A2:3B:1C": { seenAt: null, plays: 0, playedMs: 1700 } });
+  assert.deepEqual(record.cartridges, { "04:A2:3B:1C": { members: [], seenAt: null, plays: 0, playedMs: 1700 } });
   assert.equal(record.history.length, LIMITS.history);
   assert.ok(record.history.every((entry) => entry.kind === "insert" && entry.id > 0));
   assert.ok(record.nextId > Math.max(...record.history.map((entry) => entry.id)), "new entries never reuse an id");
@@ -102,12 +103,12 @@ test("player record: a valid record survives a JSON round trip unchanged", () =>
   const record = {
     v: 1,
     devices: {
-      "cp-1": device("cp-1", { slot: slot("04:A2:3B:1C") }),
+      "cp-1": device("cp-1", { slot: slot("04:A2:3B:1C", { outcome: "error", sessionId: null, lateFor: ["m-1"] }) }),
       "cp-2": device("cp-2", { boot: null, seq: null }),
     },
     active: "cp-1",
     unknown: [{ tag: "04:11:22:33", firstSeenAt: AT, lastSeenAt: AT }],
-    cartridges: { "04:A2:3B:1C": { seenAt: AT, plays: 3, playedMs: 60_000 } },
+    cartridges: { "04:A2:3B:1C": { members: ["m-1", "m-2"], seenAt: AT, plays: 3, playedMs: 60_000 } },
     history: [
       {
         id: 2,
@@ -136,6 +137,22 @@ test("player record: a valid record survives a JSON round trip unchanged", () =>
   assert.equal(activeDevice(record).id, "cp-1");
   assert.equal(slotHolding(record, "04:A2:3B:1C").device.id, "cp-1");
   assert.equal(slotHolding(record, "04:11:22:33"), null);
+});
+
+test("player record: whom a cartridge tracks for and whom a refused start named are member lists, never empty ones", () => {
+  const read = (cartridge, lateFor) =>
+    readPlayerRecord({
+      v: 1,
+      devices: { "cp-1": device("cp-1", { slot: slot("04:A2:3B:1C", { outcome: "error", lateFor }) }) },
+      cartridges: { "04:A2:3B:1C": cartridge },
+    });
+  const record = read({ members: ["m-1", "", 7, "m-2", "m-1"] }, ["m-2", null, "m-2"]);
+  assert.deepEqual(record.cartridges["04:A2:3B:1C"].members, ["m-1", "m-2"]);
+  assert.deepEqual(record.devices["cp-1"].slot.lateFor, ["m-2"]);
+  // A single id is a list of one.
+  assert.deepEqual(read({}, "m-1").devices["cp-1"].slot.lateFor, ["m-1"]);
+  assert.deepEqual(read({}, "m-1").cartridges["04:A2:3B:1C"].members, []);
+  for (const lateFor of [[], [""], null, 3, {}]) assert.equal(read({}, lateFor).devices["cp-1"].slot.lateFor, null);
 });
 
 test("the device shown without an active one is the one heard from last", () => {

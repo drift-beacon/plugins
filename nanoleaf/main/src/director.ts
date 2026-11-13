@@ -4,6 +4,7 @@
  * changes the wall, and publishes `output`. Decisions are in policy.ts, the takeover and hand-back in wall.ts, and the
  * per-tick I/O in session.ts; this class holds the inputs. Clock, timers, client and stream are injected.
  */
+import { actingFor } from "../../shared/acting-for.ts";
 import { parseColor, toLedRgb, WARM_WHITE } from "../../shared/color.ts";
 import { effectDuration, type EffectSpec, sameSpec } from "../../shared/effects.ts";
 import { placeLayout } from "../../shared/geometry.ts";
@@ -18,7 +19,7 @@ import {
   withPreview,
 } from "../../shared/render.ts";
 import { decideScene, OFF_SCENE } from "../../shared/scene.ts";
-import { DEFAULT_SETTINGS, readLayout, readOrder, readSettings } from "../../shared/storage.ts";
+import { DEFAULT_SETTINGS, readLayout, readOrder, readSettings, readZones } from "../../shared/storage.ts";
 import {
   type ControlEffect,
   type ControlInfo,
@@ -118,7 +119,6 @@ export const DEFAULT_TIMINGS: DirectorTimings = Object.freeze({
 
 /** Everything a Director needs. */
 export interface DirectorOptions {
-  readonly userId: string;
   /** This instance, for the controller claim. */
   readonly owner: ClaimOwner;
   readonly data: () => WorkspaceData;
@@ -198,7 +198,7 @@ export class Director {
   #seenMark: number | null = null;
   /** The running preview: what it shows, when it lapses, and the interface copy holding it (null: nobody's). */
   #lease: { readonly preview: Preview; readonly until: number; readonly owner: string | null } | null = null;
-  /** The lock a controller holds (`takeControl`): its effect shows in place of the user's own scene. */
+  /** The lock a controller holds (`takeControl`): its effect shows in place of the workspace's own scene. */
   #control: ControlLock | null = null;
   /** Recent `takeControl` answers per holder, newest first, by `requestId`. */
   readonly #answers = new Map<string, readonly RememberedAnswer[]>();
@@ -579,8 +579,9 @@ export class Director {
         this.#o.log.error("Couldn't publish the control state", error);
       }
     }
-    const { activities, sessions } = this.#o.data();
-    const scene = decideScene({ userId: this.#o.userId, activities, sessions, settings, now, control: this.#control });
+    const { activities, sessions, members } = this.#o.data();
+    const following = actingFor(readZones(this.#o.storage.get(STORAGE_KEYS.zones))[0]?.member, members);
+    const scene = decideScene({ activities, sessions, following, settings, now, control: this.#control });
     if (this.#yieldedKey !== null && scene.key !== this.#yieldedKey) this.#clearYield();
     this.#scene = scene;
     this.#render = this.#render ? advance(this.#render, scene, now) : initialRenderState(scene, now);

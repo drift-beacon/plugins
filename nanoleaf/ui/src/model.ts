@@ -1,15 +1,18 @@
 import { createContext, createElement, type ReactNode, useContext } from "react";
+import { actingFor } from "../../shared/acting-for.ts";
 import type {
   ActivityLike,
   ConnectionInfo,
   ControlLease,
   FoundController,
   Layout,
+  MemberLike,
   OutputInfo,
   PanelOrder,
   SessionLike,
   Settings,
   TouchGesture,
+  Zone,
 } from "../../shared/types.ts";
 import type { ControllerChange, PairingStep, PairResult, PreviewRequest } from "../../shared/ui-channel.ts";
 
@@ -41,7 +44,6 @@ export type MainStatus =
  * the prototype harness supplies a simulator, so both render the same components.
  */
 export interface NanoleafModel {
-  readonly userId: string;
   /**
    * Every activity, archived included, in the app's order: a live session on an archived activity still glows (as
    * core's live-activity slot shows it). Lists and pickers filter `!archived`; pins of archived activities don't count.
@@ -50,6 +52,13 @@ export interface NanoleafModel {
   /** Every session in the workspace, newest first. */
   readonly sessions: readonly SessionLike[];
   readonly settings: Settings;
+  /** The workspace's members, as this device last heard (none from an app that sends no roster). */
+  readonly members: readonly MemberLike[];
+  /**
+   * Who the wall follows, as stored: one zone, the whole wall, with one member. Who it acts for is
+   * `actingFor(zones[0]?.member, members)`, worked out where it is used.
+   */
+  readonly zones: readonly Zone[];
   readonly order: PanelOrder;
   readonly layout: Layout | null;
   /** The paired controller, without its token. */
@@ -81,6 +90,8 @@ export interface NanoleafModel {
     saveSettings(patch: Partial<Settings>): Promise<void>;
     /** As `saveSettings`. */
     saveOrder(order: PanelOrder): Promise<void>;
+    /** The member the wall follows, as `saveSettings`. Keeps the zone's id. */
+    saveZoneMember(member: string): Promise<void>;
     /** Aborting `signal` ends the search in main too. */
     discover(timeoutMs?: number, signal?: AbortSignal): Promise<readonly FoundController[]>;
     /** Rejects `invalid` for an address that isn't on the local network. */
@@ -125,4 +136,9 @@ export function useModel(): NanoleafModel {
   const model = useContext(ModelContext);
   if (!model) throw new Error("useModel() needs a <ModelProvider>");
   return model;
+}
+
+/** Who the wall follows, worked out as main works it out: the zone's member while in the workspace, else the owner. */
+export function followingOf(model: Pick<NanoleafModel, "members" | "zones">): string[] {
+  return actingFor(model.zones[0]?.member, model.members);
 }

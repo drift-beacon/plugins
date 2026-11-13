@@ -11,8 +11,11 @@ import {
   readOrder,
   readRawPanels,
   readSettings,
+  readZones,
   sameLayout,
   SETTING_RANGES,
+  WALL_ZONE_ID,
+  zonesFollowing,
 } from "../shared/storage.ts";
 
 /** Values that are never a valid object of any kind. */
@@ -328,4 +331,23 @@ test("storage values survive a JSON round trip unchanged", () => {
   const panels = [{ id: 1, x: 2, y: 3, o: 60, shapeType: 7 }];
   const layout = readLayout({ controllerId: "c", globalOrientation: 30, panels });
   assert.equal(sameLayout(readLayout(JSON.parse(JSON.stringify(layout))), layout), true);
+});
+
+test("readZones keeps the first zone's id and its one member; anything else is no zones", () => {
+  assert.deepEqual(readZones([{ id: "wall", member: " sam " }]), [{ id: "wall", member: "sam" }]);
+  assert.deepEqual(readZones([{ id: "z1", member: "sam" }, { id: "z2", member: "alex" }]), [
+    { id: "z1", member: "sam" },
+  ]);
+  assert.deepEqual(readZones([{ member: "sam" }]), [{ id: WALL_ZONE_ID, member: "sam" }], "no id");
+  for (const member of [undefined, null, "", 3, ["sam"]]) {
+    assert.deepEqual(readZones([{ id: "wall", member }]), [{ id: "wall", member: null }]);
+  }
+  for (const bad of GARBAGE) assert.deepEqual(readZones(bad), []);
+  assert.deepEqual(readZones([null, { id: "wall", member: "sam" }]), []);
+});
+
+test("the picker writes one zone with the member picked, keeping the zone's id", () => {
+  assert.deepEqual(zonesFollowing(undefined, "sam"), [{ id: WALL_ZONE_ID, member: "sam" }]);
+  assert.deepEqual(zonesFollowing([{ id: "z1", member: "sam" }], "alex"), [{ id: "z1", member: "alex" }]);
+  assert.deepEqual(zonesFollowing([{ id: "z1", member: "sam" }, { id: "z2" }], "alex"), [{ id: "z1", member: "alex" }]);
 });

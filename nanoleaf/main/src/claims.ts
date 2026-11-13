@@ -1,11 +1,12 @@
 /**
- * Who drives which controller. Every instance of this plugin (one per user and workspace) runs in the same host
- * process and shares this module, so module-level maps arbitrate between them: the first to claim a controller drives
- * it and the others report `busy`; and a yield to someone outside the plugin belongs to the controller, so no other
- * instance takes the wall straight back. This is the one piece of state deliberately kept at module scope.
+ * Who drives which controller. Every instance of this plugin (one per workspace, and a development build's beside the
+ * installed copy) runs in the same host process and shares this module, so module-level maps arbitrate between them:
+ * the first to claim a controller drives it and the others report `busy`; and a yield to someone outside the plugin
+ * belongs to the controller, so no other instance takes the wall straight back. This is the one piece of state
+ * deliberately kept at module scope.
  */
 
-/** An instance that can hold claims: a unique token, and a label for logs ("user@workspace"). */
+/** An instance that can hold claims: a unique token, and a label for logs (its workspace's id). */
 export interface ClaimOwner {
   readonly token: symbol;
   readonly label: string;

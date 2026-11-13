@@ -28,7 +28,6 @@ const LAYOUT = {
 /** A model with main running, the controller connected and main driving the wall. */
 function model(overrides = {}) {
   return {
-    userId: "u",
     activities: [],
     sessions: [],
     settings: DEFAULT_SETTINGS,

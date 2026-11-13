@@ -218,6 +218,8 @@ const activity = (id, color, extra = {}) => ({
   goal: null,
   period: null,
   pinned: false,
+  placedBy: null,
+  progress: extra.goal?.type === "count" ? { type: "count", count: 0 } : { type: "duration", seconds: 0 },
   ...extra,
 });
 
@@ -227,13 +229,14 @@ const liveSession = (id, activityId, startedAt) => ({
   type: "span",
   status: "live",
   memberIds: [USER],
+  currentMemberIds: [USER],
   startedAt: new Date(startedAt),
   endedAt: null,
 });
 
 /**
  * A Director over fakes, connected to a fresh fake controller with theduck's layout. `shared: env` makes a second
- * instance (its own storage, data and owner) on env's controller and clock, as two users of one wall.
+ * instance (its own storage, data and owner) on env's controller and clock, as two workspaces on one wall.
  */
 function setup(options = {}) {
   const shared = options.shared;
@@ -249,6 +252,7 @@ function setup(options = {}) {
   const data = {
     activities: options.activities ?? [activity("a1", PURPLE), activity("a2", "#10b981")],
     sessions: options.sessions ?? [],
+    members: options.members ?? [{ id: USER, name: "U", role: "OWNER" }],
   };
   const streams = [];
   const published = [];
@@ -256,7 +260,6 @@ function setup(options = {}) {
   const deviceErrors = [];
   const owner = createOwner("test");
   const director = new Director({
-    userId: USER,
     owner,
     data: () => data,
     storage,
@@ -891,10 +894,12 @@ test("a sweep set to fill as a line drives the wall by distance: each panel as f
 });
 
 test("a takeover keeps the tracked render state: the goal-met wave plays once, not again on a restart", async () => {
-  const goal = { goal: { type: "count", count: 3 }, period: "day" };
+  // Two sessions ended earlier today: Drift Beacon counts them in the activity's progress.
+  const goal = { goal: { type: "count", count: 3 }, period: "day", progress: { type: "count", count: 2 } };
   const done = (id, endedAt) => ({
     ...liveSession(id, "a1", endedAt - 600_000),
     status: "completed",
+    currentMemberIds: [],
     endedAt: new Date(endedAt),
   });
   const earlier = [done("s1", T0 - 3_600_000), done("s2", T0 - 2_000_000)];
@@ -1753,6 +1758,34 @@ test("output is published only when it changes", async () => {
     ],
   );
   assert.equal(env.published[3].since, new Date(T0 + 5000).toISOString());
+  await env.director.stop();
+});
+
+test("the wall shows only a session the member it follows is in: the zone's member now, else the owner", async () => {
+  const OTHER = "u2";
+  const theirs = { ...liveSession("s2", "a2", T0 - 60_000), memberIds: [OTHER], currentMemberIds: [OTHER] };
+  const env = setup({
+    sessions: [theirs],
+    members: [
+      { id: USER, name: "U", role: "OWNER" },
+      { id: OTHER, name: "O", role: "MEMBER" },
+    ],
+  });
+  await connect(env);
+  assert.equal(env.director.output.mode, "idle", "nothing stored: the owner, who isn't in it");
+  await env.storage.set("zones", [{ id: "wall", member: OTHER }]);
+  env.director.update();
+  assert.equal(env.director.output.mode, "live");
+  assert.equal(env.director.output.activityId, "a2");
+  env.data.members = [{ id: USER, name: "U", role: "OWNER" }];
+  env.director.update();
+  assert.equal(env.director.output.mode, "idle", "they left the workspace: the owner again");
+  assert.deepEqual(env.storage.map.get("zones"), [{ id: "wall", member: OTHER }], "never written back");
+  startLive(env);
+  assert.equal(env.director.output.mode, "live");
+  env.data.members = [];
+  env.director.update();
+  assert.equal(env.director.output.mode, "idle", "no roster: it follows nobody");
   await env.director.stop();
 });
 

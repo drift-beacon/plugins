@@ -5,7 +5,7 @@ import type { Tag } from "../../shared/tags.ts";
 import type { LabelResult, StartResult } from "../../shared/ui-channel.ts";
 import type { MainStatus } from "./view/main-status.ts";
 import type { ReadingBeat } from "./view/phase.ts";
-import type { ActivityLookup, ActivityView, CategoryView, LiveSession } from "./view/types.ts";
+import type { ActivityLookup, ActivityView, CategoryView, LiveSession, MemberView } from "./view/types.ts";
 
 /**
  * Everything the interface reads and does. The view never touches `ctx`: the live model wraps it (live-model.ts) and
@@ -17,7 +17,9 @@ export interface PlayerModel {
   readonly activities: readonly ActivityView[];
   readonly lookup: ActivityLookup;
   readonly categories: readonly CategoryView[];
-  /** The current user's live sessions. */
+  /** The workspace's members, as this device last heard; none from an app that sends no roster. */
+  readonly members: readonly MemberView[];
+  /** The workspace's live sessions, anyone's or nobody's: the slot's own is found by its id. */
   readonly live: readonly LiveSession[];
   readonly mappings: TagMappings;
   readonly record: PlayerRecord;
@@ -34,6 +36,8 @@ export interface PlayerModel {
   /** Every change goes through main (shared/ui-channel.ts). Each rejects with a `PluginError` main or the app threw. */
   readonly actions: {
     label(tag: Tag, activityId: string): Promise<LabelResult>;
+    /** Whom a labelled cartridge tracks for, from the next time it goes in. Resolves to the members main stored. */
+    setMembers(tag: Tag, members: readonly string[]): Promise<readonly string[]>;
     forget(tag: Tag): Promise<void>;
     dismiss(tag: Tag): Promise<void>;
     start(deviceId: string | null): Promise<StartResult>;

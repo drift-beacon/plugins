@@ -6,6 +6,7 @@ import { decodeSetupCode } from "../shared/setup-code.ts";
 import { readMappings, readPlayerRecord } from "../shared/storage.ts";
 import { SAVE_REFUSED } from "../shared/ui-channel.ts";
 import { stableReader, stableRows } from "../ui/src/lib/stable.ts";
+import { createMainChannel } from "../ui/src/main-channel.ts";
 import { contrast, inkOn, INK_DARK, INK_LIGHT, mixed, parseColor, shaded, sticker, STICKER_FADE, STICKER_SHADE, stickerPaint } from "../ui/src/view/color.ts";
 import { recordedByMain, requestError } from "../ui/src/view/errors.ts";
 import { clock, duration, durationPhrase, relative, since } from "../ui/src/view/format.ts";
@@ -24,6 +25,7 @@ import {
   unknownItems,
 } from "../ui/src/view/library.ts";
 import { canChange, mainNotice, mainStatusOf } from "../ui/src/view/main-status.ts";
+import { tickedMembers, toggledMembers } from "../ui/src/view/members.ts";
 import { pickerGroups } from "../ui/src/view/picker.ts";
 import { everHeard, presenceView, readPresence } from "../ui/src/view/presence.ts";
 import { guideSteps, heardMark, heardSince, hubDefaults, setupCodeFor, splitHost } from "../ui/src/view/setup.ts";
@@ -439,4 +441,36 @@ test("live model: workspace rows keep their objects through a rebuild, so one se
   assert.notEqual(swapped, renamed);
   assert.equal(swapped[1], renamed[0]);
   assert.deepEqual(rows([]), []);
+});
+
+test("tracks for: ticks are what main stored once it answers, and only members on this device's roster", async () => {
+  const alex = { id: "m-alex", name: "Alex", role: "OWNER" };
+  const sam = { id: "m-sam", name: "Sam", role: "MEMBER" };
+  const riley = { id: "m-riley", name: "Riley", role: "MEMBER" };
+  // Riley left the workspace; this device still lists her. Ticking her sends [Sam, Riley] and main stores [Sam].
+  const sent = [];
+  const port = {
+    request: async (name, input) => {
+      sent.push({ name, input });
+      return { tag: input.tag, members: input.members.filter((id) => id !== riley.id) };
+    },
+    onMessage: () => () => {},
+    onResync: () => () => {},
+  };
+  const channel = createMainChannel(port, () => readPlayerRecord(undefined));
+  const asked = toggledMembers(tickedMembers(null, [sam.id], [alex, sam, riley]), riley.id);
+  assert.deepEqual(asked, [sam.id, riley.id]);
+  const answered = await channel.actions.setMembers(A, asked);
+  assert.deepEqual(sent, [{ name: "members", input: { tag: A, members: [sam.id, riley.id] } }]);
+  assert.deepEqual(answered, [sam.id]);
+  assert.deepEqual(tickedMembers(answered, [sam.id], [alex, sam, riley]), [sam.id]);
+  // Sam is the last one ticked: he can't be unticked.
+  assert.equal(toggledMembers([sam.id], sam.id), null);
+  // A choice still on its way that names someone the roster has since dropped ticks only those left.
+  assert.deepEqual(tickedMembers([sam.id, riley.id], [sam.id], [alex, sam]), [sam.id]);
+  assert.equal(toggledMembers(tickedMembers([sam.id, riley.id], [sam.id], [alex, sam]), sam.id), null);
+  // Nobody stored, or only people who left: the owner is ticked.
+  assert.deepEqual(tickedMembers(null, [], [alex, sam]), [alex.id]);
+  assert.deepEqual(tickedMembers(null, [riley.id], [alex, sam]), [alex.id]);
+  assert.deepEqual(toggledMembers([alex.id, sam.id], alex.id), [sam.id]);
 });

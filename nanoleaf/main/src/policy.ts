@@ -34,8 +34,8 @@ export interface ControlInput {
 /** `output` without its timestamp: what is compared to decide whether to publish. */
 export type OutputCore = Omit<OutputInfo, "since">;
 
-/** Detail for `busy`: the claim is another user's or workspace's. */
-export const BUSY_DETAIL = "Another Drift Beacon user or workspace is driving this controller";
+/** Detail for `busy`: the claim is another workspace's (or a development build's beside the installed copy). */
+export const BUSY_DETAIL = "Another Drift Beacon workspace is driving this controller";
 /** Detail for `yielded` when there is no better reason. */
 export const YIELDED_DETAIL = "Someone else changed the wall";
 /** Detail when the layout has no panels this plugin can drive. */

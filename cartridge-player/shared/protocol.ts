@@ -125,7 +125,8 @@ export function parseReport(body: unknown): Parsed<PlayerReport> {
 /**
  * What a report did:
  * - started / marked: the cartridge went in and its activity started (a span) or was marked (a point)
- * - resumed: it went in, or is still in after a restart, and its activity was already live: that session carries on
+ * - resumed: it went in while everyone it tracks for was in a live session of its activity, or is still in after a
+ *   restart while its session runs: that session carries on
  * - unchanged: the slot is as main last knew it (a heartbeat, a retry, a repeat)
  * - ended / empty: the slot emptied and its session ended, or there was nothing to end
  * - unknown: an unlabelled cartridge went in; orphan / archived: its activity was deleted / archived

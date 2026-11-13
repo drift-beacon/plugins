@@ -14,6 +14,7 @@ import {
   type ReportResult,
   playerReply,
 } from "../../shared/protocol.ts";
+import { actingFor } from "../../shared/acting-for.ts";
 import type { PresenceState, SlotState } from "../../shared/state.ts";
 import {
   activeDevice,
@@ -33,12 +34,14 @@ import {
   type TagMappings,
 } from "../../shared/storage.ts";
 import { normalizeTag, type Tag } from "../../shared/tags.ts";
-import { type LabelResult, SAVE_REFUSED, type StartResult } from "../../shared/ui-channel.ts";
+import { type LabelResult, type MembersResult, SAVE_REFUSED, type StartResult } from "../../shared/ui-channel.ts";
 import {
   agrees,
   type InsertResult,
   isOwnLiveSpan,
   isRetry,
+  lateFor,
+  lateSession,
   type Lookup,
   orderReport,
   playedMs,
@@ -75,9 +78,12 @@ const FULL_RETRY_MS = 60_000;
 export interface Player {
   /** Applies a report (or answers one that changes nothing from the cache). An ErrorReply is sent as 503. */
   report(report: PlayerReport, hubHost: string | null): Promise<PlayerReply | ErrorReply>;
-  label(tag: string, activityId: string): Promise<LabelResult>;
+  /** `viewer` is the member who labels it: a cartridge labelled for the first time tracks for them by default. */
+  label(tag: string, activityId: string, members: readonly string[] | undefined, viewer: string): Promise<LabelResult>;
+  members(tag: string, members: readonly string[]): Promise<MembersResult>;
   forget(tag: string): Promise<{ readonly forgotten: boolean }>;
   dismiss(tag: string): Promise<{ readonly dismissed: boolean }>;
+  /** Starts the cartridge in the slot for its members, whoever pressed Start. */
   start(deviceId: string | undefined): Promise<StartResult>;
   /** Reads storage: lines the record up with the labels, publishes. Synchronous. */
   open(): void;
@@ -100,6 +106,8 @@ interface Performed {
   readonly error: string | null;
   /** The rejection, when the action failed. */
   readonly cause: unknown;
+  /** Whom a refused start may still have run for (`Slot.lateFor`). */
+  readonly lateFor: readonly string[] | null;
 }
 
 /** What a slot change came to: the reply's result and the activity it's about. */
@@ -126,8 +134,10 @@ interface LostInsert {
 
 /** Nothing to write: the request found everything as it asked. */
 const NOTHING_TO_SAVE = Promise.resolve(true);
-/** The refusal for a label, forget or dismiss storage wouldn't take. */
+/** The refusal for a label, members, forget or dismiss storage wouldn't take. */
 const notSaved = (): PluginError => new PluginError("failed", SAVE_REFUSED);
+/** What the slot says when there was nobody to start a cartridge for: the app sent no members. */
+const NOBODY = "Nothing started: this Drift Beacon doesn't say who's in the workspace";
 
 /** What a history entry says beyond its kind and tag; anything left out is null. */
 type HistoryFields = Partial<Pick<HistoryEntry, "activityId" | "deviceId" | "sessionId" | "durationMs">>;
@@ -140,7 +150,12 @@ export function createPlayer(ctx: MainContext, options: PlayerOptions): Player {
   const { log } = ctx;
   const { now } = options;
   const queue = createQueue();
-  const lookup: Lookup = { activity: (id) => ctx.activities.get(id), session: (id) => ctx.sessions.get(id) };
+  const lookup: Lookup = {
+    activity: (id) => ctx.activities.get(id),
+    session: (id) => ctx.sessions.get(id),
+  };
+  /** The workspace's members; none from a hub that sends no roster. */
+  const roster = () => ctx.members ?? [];
   /** Per device: the last applied report's `(boot, seq)` and the reply it got. */
   const replies = new Map<string, { readonly boot: number; readonly seq: number; readonly reply: PlayerReply }>();
   /**
@@ -236,14 +251,21 @@ export function createPlayer(ctx: MainContext, options: PlayerOptions): Player {
 
   /**
    * The session taking the cartridge out of `slot` would end, were it live: the one it started or adopted. A slot in
-   * outcome `error` has none, but the start it was refused may still have run (the host stops waiting after 10 s) and
-   * its session shows up later: a live session of its activity is this cartridge's, and nothing else would end it.
-   * Every rule that asks whose a session is asks here, so they can't disagree with eject.
+   * outcome `error` has none, but a refused start that may still have run (the host stops waiting after 10 s) can
+   * show up later: a live span of its activity started since the cartridge went in, for the members that start named
+   * (`slot.lateFor`), is this cartridge's, and nothing else would end it. A refusal that can't have run, or a session
+   * someone else started meanwhile, is never the slot's. Every rule that asks whose a session is asks here, so they
+   * can't disagree with eject.
    */
   function slotSession(slot: Slot): string | null {
-    if (slot.sessionId !== null || slot.outcome !== "error" || slot.activityId === null) return slot.sessionId;
-    return lookup.activity(slot.activityId)?.live({ mine: true })[0]?.id ?? null;
+    const { sessionId, outcome, activityId, lateFor: members } = slot;
+    if (sessionId !== null || outcome !== "error" || activityId === null || members === null) return sessionId;
+    return lateSession(lookup.activity(activityId), slot.since, members);
   }
+
+  /** Whom `tag` tracks for now: its chosen members still in the workspace, else the owner (`actingFor`). */
+  const membersOf = (rec: PlayerRecord, tag: Tag): string[] =>
+    actingFor(Object.hasOwn(rec.cartridges, tag) ? rec.cartridges[tag].members : undefined, roster());
 
   /** The slot's own session is live: taking the cartridge out would end it. */
   function isPlaying(slot: Slot | null): boolean {
@@ -308,7 +330,7 @@ export function createPlayer(ctx: MainContext, options: PlayerOptions): Player {
 
   /** Runs what a resolution names. A rejected action is outcome `error`, never a thrown error. */
   async function perform(resolution: Resolution): Promise<Performed> {
-    const base = { sessionId: null, error: null, cause: undefined };
+    const base = { sessionId: null, error: null, cause: undefined, lateFor: null };
     switch (resolution.kind) {
       case "unknown":
         return { ...base, result: "unknown", activityId: null, name: null };
@@ -322,11 +344,19 @@ export function createPlayer(ctx: MainContext, options: PlayerOptions): Player {
         const { activity, sessionId } = resolution;
         return { ...base, result: "resumed", activityId: activity.id, sessionId, name: activity.name };
       }
+      case "nobody": {
+        // A start or a mark always names its members: with nobody to name, nothing is sent.
+        const { activity } = resolution;
+        log.warn(`Didn't start ${activity.name}: the workspace's members aren't known, so there is nobody to name`);
+        const cause = new PluginError("invalid", NOBODY);
+        return { ...base, result: "error", activityId: activity.id, name: activity.name, error: NOBODY, cause };
+      }
       case "mark":
       case "start": {
         const { activity } = resolution;
         try {
-          const session = resolution.kind === "mark" ? await activity.mark() : await activity.track();
+          const options = { members: resolution.members };
+          const session = resolution.kind === "mark" ? await activity.mark(options) : await activity.track(options);
           const result = resolution.kind === "mark" ? "marked" : "started";
           return { ...base, result, activityId: activity.id, sessionId: session.id, name: activity.name };
         } catch (error) {
@@ -337,7 +367,7 @@ export function createPlayer(ctx: MainContext, options: PlayerOptions): Player {
             name: activity.name,
             error: messageOf(error),
           } as const;
-          return { ...base, ...failed, cause: error };
+          return { ...base, ...failed, cause: error, lateFor: lateFor(resolution, error) };
         }
       }
     }
@@ -433,8 +463,8 @@ export function createPlayer(ctx: MainContext, options: PlayerOptions): Player {
   }
 
   /**
-   * Puts `tag` in `deviceId`'s slot and resolves it: the interface hears `reading` first, with the id of the history
-   * entry this insert will write (`rec.nextId`: nothing else writes until it has). Commits.
+   * Puts `tag` in `deviceId`'s slot and resolves it for the cartridge's members: the interface hears `reading` first,
+   * with the id of the history entry this insert will write (`rec.nextId`: nothing else writes until it has). Commits.
    */
   async function insert(
     rec: PlayerRecord,
@@ -442,8 +472,9 @@ export function createPlayer(ctx: MainContext, options: PlayerOptions): Player {
     tag: Tag,
   ): Promise<{ rec: PlayerRecord; changed: Changed }> {
     tell("reading", () => ctx.ui.post("reading", { tag, deviceId, entry: rec.nextId }));
-    const done = await perform(resolveCartridge(mappedActivity(mappings(), tag), lookup));
+    // Taken before the action: a refused start that ran late started after this, and `slotSession` finds it so.
     const at = iso(now());
+    const done = await perform(resolveCartridge(mappedActivity(mappings(), tag), lookup, membersOf(rec, tag)));
     const slot: Slot = {
       tag,
       since: at,
@@ -451,6 +482,7 @@ export function createPlayer(ctx: MainContext, options: PlayerOptions): Player {
       sessionId: done.sessionId,
       outcome: done.result,
       error: done.error,
+      lateFor: done.lateFor,
     };
     const next = withInserted(rec, deviceId, slot);
     const saved = write(next);
@@ -598,8 +630,25 @@ export function createPlayer(ctx: MainContext, options: PlayerOptions): Player {
     return tag;
   }
 
-  async function label(text: string, activityId: string): Promise<Written<LabelResult>> {
+  /**
+   * The members a request picks: repeats dropped, and anyone no longer in the workspace left out, as `actingFor` would
+   * leave them out. Refused when that leaves nobody.
+   */
+  function picked(members: readonly string[]): string[] {
+    const ids = new Set(roster().map((member) => member.id));
+    const kept = [...new Set(members)].filter((id) => ids.has(id));
+    if (kept.length === 0) throw new PluginError("invalid", "Pick at least one person in this workspace");
+    return kept;
+  }
+
+  async function label(
+    text: string,
+    activityId: string,
+    members: readonly string[] | undefined,
+    viewer: string,
+  ): Promise<Written<LabelResult>> {
     const tag = tagOf(text);
+    const chosen = members === undefined ? undefined : picked(members);
     const activity = ctx.activities.get(activityId);
     if (!activity?.exists) throw new PluginError("invalid", "That activity no longer exists");
     if (activity.archived) throw new PluginError("invalid", `${activity.name} is archived: pick another activity`);
@@ -619,19 +668,34 @@ export function createPlayer(ctx: MainContext, options: PlayerOptions): Player {
       rec = history(rec, previous === null ? "label" : "relabel", tag, { activityId, deviceId: holder?.device.id });
     }
     const seen = rec.unknown.find((item) => item.tag === tag)?.lastSeenAt ?? null;
-    rec = withStats(withoutUnknown(rec, tag), tag, (stats) =>
-      stats.seenAt === null ? { ...stats, seenAt: seen } : stats,
-    );
+    // A first label: a new cartridge, or one still listed as seen because its record write was refused last time.
+    // It tracks for the member labelling it unless the request picks; one labelled again keeps whom it tracks for.
+    const first = previous === null || rec.unknown.some((item) => item.tag === tag);
+    const byViewer = roster().some((member) => member.id === viewer) ? [viewer] : [];
+    rec = withStats(withoutUnknown(rec, tag), tag, (stats) => ({
+      ...stats,
+      seenAt: stats.seenAt ?? seen,
+      members: chosen ?? (first && stats.members.length === 0 ? byViewer : stats.members),
+    }));
     if (holder) {
       const { device, slot } = holder;
       // A playing cartridge keeps its session (it still ends on eject); the new label applies next time it goes in.
       if (!isPlaying(slot) && (slot.activityId !== activityId || !STARTED.includes(slot.outcome))) {
         rec = settle(rec, slot);
-        const idle: Slot = { ...slot, activityId, sessionId: null, outcome: "idle", error: null };
+        const idle: Slot = { ...slot, activityId, sessionId: null, outcome: "idle", error: null, lateFor: null };
         rec = withDevice(rec, { ...rec.devices[device.id], slot: idle });
       }
     }
     return { result: { tag, activityId, previous, inSlot: holder !== null }, saved: write(rec) };
+  }
+
+  /** Whom a labelled cartridge tracks for, from the next time it goes in or Start is pressed. */
+  async function members(text: string, list: readonly string[]): Promise<Written<MembersResult>> {
+    const tag = tagOf(text);
+    const chosen = picked(list);
+    if (mappedActivity(mappings(), tag) === null) throw new PluginError("not-found", "Label this cartridge first");
+    const next = withStats(record(), tag, (stats) => ({ ...stats, members: chosen }));
+    return { result: { tag, members: chosen }, saved: write(next) };
   }
 
   async function forget(text: string): Promise<Written<{ readonly forgotten: boolean }>> {
@@ -688,10 +752,12 @@ export function createPlayer(ctx: MainContext, options: PlayerOptions): Player {
     if (!device || !slot) throw new PluginError("not-found", "There's no cartridge in the player");
     // Already playing its own session: there's nothing to start, whatever it's labelled now (a new label applies the
     // next time it goes in).
-    // (A slot whose refused start ran late goes on: resolving it adopts that session, so it shows as playing.)
     if (isPlaying(slot) && slot.outcome !== "error")
       return { activityId: slot.activityId as string, sessionId: slot.sessionId, result: "resumed" };
-    const resolution = resolveCartridge(mappedActivity(mappings(), slot.tag), lookup);
+    // Resolved for the cartridge's members, whoever pressed Start: a span they are all in is adopted (a refused start
+    // that ran late among them), and otherwise one is started for them. A late session they aren't all in then runs
+    // on, no longer the slot's.
+    const resolution = resolveCartridge(mappedActivity(mappings(), slot.tag), lookup, membersOf(rec, slot.tag));
     if (resolution.kind === "unknown") throw new PluginError("not-found", "Label this cartridge first");
     if (resolution.kind === "orphan")
       throw new PluginError("not-found", "Its activity no longer exists: label it again");
@@ -704,6 +770,7 @@ export function createPlayer(ctx: MainContext, options: PlayerOptions): Player {
       sessionId: done.sessionId,
       outcome: done.result,
       error: done.error,
+      lateFor: done.lateFor,
     };
     rec = withDevice(settle(rec, slot), { ...device, slot: next });
     if (done.result === "error") {
@@ -774,7 +841,8 @@ export function createPlayer(ctx: MainContext, options: PlayerOptions): Player {
       }
       return queued(() => applyReport(report, hubHost));
     },
-    label: (tag, activityId) => confirmed(queued(() => label(tag, activityId))),
+    label: (tag, activityId, chosen, viewer) => confirmed(queued(() => label(tag, activityId, chosen, viewer))),
+    members: (tag, list) => confirmed(queued(() => members(tag, list))),
     forget: (tag) => confirmed(queued(() => forget(tag))),
     dismiss: (tag) => confirmed(queued(() => dismiss(tag))),
     start: (deviceId) => queued(() => start(deviceId)),

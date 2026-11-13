@@ -24,6 +24,7 @@ const ELSEWHERE: [label: string, key: string, event: SimEvent, title: string][] 
   ["Fail save", "V", { type: "fail-save" }, "Storage refuses the next label, forget or dismiss: main answers that it couldn't save it"],
   ["Fail start", "T", { type: "fail-start" }, "The next start or mark is refused by the app: main records the error on the slot"],
   ["Late beat", "B", { type: "late-beat" }, "The reading message arrives after its outcome (toggle)"],
+  ["One member", "U", { type: "solo" }, "The workspace is its owner alone, or its three members again (toggle)"],
 ];
 
 /** The simulator's controls, outside the variant tree; keys work anywhere except in a text field. */
@@ -98,6 +99,7 @@ export function SimPanel({ onReducedMotion, reduced }: { onReducedMotion(): void
           {readout.failSave ? " · next save refused" : ""}
           {readout.failStart ? " · next start fails" : ""}
           {readout.lateBeat ? " · beat late" : ""}
+          {readout.members === 1 ? " · one member" : ` · ${readout.members} members`}
         </p>
       )}
     </div>

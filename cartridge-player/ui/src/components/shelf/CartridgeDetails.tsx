@@ -9,6 +9,7 @@ import { FORGET_CLEARS_SLOT, forgetBlockedNote, forgetRefusal, forgetState, type
 import { ActivityPicker } from "../ActivityPicker.tsx";
 import { Icon } from "../Icon.tsx";
 import { Button, InlineError } from "../kit.tsx";
+import { TracksFor } from "./TracksFor.tsx";
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
@@ -20,11 +21,12 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 /**
- * One cartridge up close: its numbers, its label, and forgetting it. It stays compact: the label is one row with
- * Change, which swaps the body for the activity picker (and back), so the overlay never holds a scrolling list inside
- * a scrolling panel and Forget is always in view. Relabelling a playing cartridge is allowed and says what it does:
- * the running session carries on, and the new label applies next time it goes in. Forgetting asks first, and is off
- * only while main would refuse it (`forgetState`): the cartridge is tracking, or it's in a player that is online.
+ * One cartridge up close: its numbers, its label, whom it tracks for (`TracksFor`), and forgetting it. It stays
+ * compact: the label is one row with Change, which swaps the body for the activity picker (and back), so the overlay
+ * never holds a scrolling list inside a scrolling panel and Forget is always in view. Relabelling a playing cartridge
+ * is allowed and says what it does: the running session carries on, and the new label applies next time it goes in.
+ * Forgetting asks first, and is off only while main would refuse it (`forgetState`): the cartridge is tracking, or
+ * it's in a player that is online.
  * One that a slot holds on the word of a player that isn't online can be forgotten, and the confirmation says that
  * this clears the slot too; if main refuses after all (it knows of players this copy can't see), that is worded here.
  *
@@ -162,6 +164,8 @@ export function CartridgeDetails({
         </div>
         {note && <p className="text-xs leading-snug text-default-500">{note}</p>}
       </div>
+
+      <TracksFor item={item} readOnly={readOnly} />
 
       {confirming ? (
         <div ref={confirmation} className="space-y-2 rounded-xl bg-danger/10 p-3 text-sm">

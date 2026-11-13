@@ -5,6 +5,7 @@ import { motion, useReducedMotion } from "motion/react";
 import { useState } from "react";
 import { useModel } from "../model.ts";
 import { EASE_IN_OUT } from "../motion.ts";
+import { FollowPicker } from "./FollowPicker.tsx";
 import { ForgetButton } from "./ForgetButton.tsx";
 import { useSettingsGroups } from "./SettingsPanel.tsx";
 import { address } from "./format.ts";
@@ -89,7 +90,10 @@ function ControllerRow() {
   );
 }
 
-/** Controller details, the switch that lets Drift Beacon drive it, and what the wall does when nothing is going on. */
+/**
+ * Controller details, the switch that lets Drift Beacon drive it, who the wall follows, and what the wall does when
+ * nothing is going on.
+ */
 export function ControllerCard() {
   const { controller, settings, actions } = useModel();
   const { idle, saveError: idleError } = useSettingsGroups();
@@ -124,6 +128,7 @@ export function ControllerCard() {
           </div>
         )}
       </div>
+      <FollowPicker />
       <div className="border-default-100 border-t">
         {idle}
         {idleError && (

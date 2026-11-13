@@ -30,16 +30,27 @@ function activity(id, extra = {}) {
     goal: null,
     period: "day",
     pinned: false,
+    placedBy: null,
+    progress: extra.goal?.type === "count" ? { type: "count", count: 0 } : { type: "duration", seconds: 0 },
     ...extra,
   };
 }
 
 function live(id, activityId, start, members = [ME]) {
-  return { id, activityId, type: "span", status: "live", memberIds: members, startedAt: start, endedAt: null };
+  return {
+    id,
+    activityId,
+    type: "span",
+    status: "live",
+    memberIds: members,
+    currentMemberIds: members,
+    startedAt: start,
+    endedAt: null,
+  };
 }
 
 function scene(input) {
-  return decideScene({ userId: ME, activities: [], sessions: [], settings: SETTINGS, now: NOW, ...input });
+  return decideScene({ activities: [], sessions: [], following: [ME], settings: SETTINGS, now: NOW, ...input });
 }
 
 test("OFF_SCENE is the frozen off scene", () => {
@@ -87,46 +98,64 @@ test("live beats pinned, at full level with the activity's LED colour and goal p
   assert.equal(scene({ activities, sessions, settings: { ...SETTINGS, track: false } }).track, false);
 });
 
-test("the newest live span wins; others' sessions and missing activities are skipped", () => {
+test("the newest live span the member the wall follows is in wins; missing activities are skipped", () => {
   const activities = [activity("a"), activity("b"), activity("c")];
   const sessions = [
+    live("gone", "deleted", new Date(2026, 8, 30, 9, 58)),
     live("theirs", "c", new Date(2026, 8, 30, 9, 55), [THEM]),
-    live("gone", "deleted", new Date(2026, 8, 30, 9, 50)),
     live("older", "a", new Date(2026, 8, 30, 8, 0)),
     live("newer", "b", new Date(2026, 8, 30, 9, 0)),
   ];
   const result = scene({ activities, sessions });
-  assert.equal(result.key, "live:newer");
+  assert.equal(result.key, "live:newer", "a newer session they aren't in doesn't light the wall");
   assert.equal(result.activityId, "b");
   assert.equal(result.progress, null, "no goal, no progress");
-  assert.equal(scene({ activities, sessions: sessions.slice(0, 3) }).key, "live:older");
+  assert.equal(scene({ activities, sessions, following: [THEM] }).key, "live:theirs");
   assert.equal(scene({ activities, sessions: sessions.slice(0, 2) }), OFF_SCENE);
+  assert.equal(scene({ activities, sessions, following: [] }), OFF_SCENE, "following nobody");
 });
 
-test("a shared live session I'm a member of counts; points and completed sessions don't", () => {
+test("who is in a span now counts: not someone who left it, nor a span nobody is in, a point or an ended one", () => {
   const activities = [activity("a")];
-  const shared = live("s1", "a", new Date(2026, 8, 30, 9, 0), [THEM, ME]);
-  assert.equal(scene({ activities, sessions: [shared] }).key, "live:s1");
-  const completed = { ...shared, status: "completed", endedAt: new Date(2026, 8, 30, 9, 30) };
+  const left = { ...live("s0", "a", new Date(2026, 8, 30, 9, 0), [THEM]), memberIds: [ME, THEM] };
+  assert.equal(scene({ activities, sessions: [left] }), OFF_SCENE, "they left it");
+  const nobody = live("s1", "a", new Date(2026, 8, 30, 9, 0), []);
+  assert.equal(scene({ activities, sessions: [nobody] }), OFF_SCENE);
+  const shared = live("s2", "a", new Date(2026, 8, 30, 9, 0), [THEM, ME]);
+  assert.equal(scene({ activities, sessions: [shared] }).key, "live:s2");
+  const completed = { ...shared, status: "completed", currentMemberIds: [], endedAt: new Date(2026, 8, 30, 9, 30) };
   assert.equal(scene({ activities, sessions: [completed] }), OFF_SCENE);
+  const point = { ...shared, type: "point", status: "completed", currentMemberIds: [] };
+  assert.equal(scene({ activities, sessions: [point] }), OFF_SCENE);
+});
+
+test("the shown span's goal progress is the activity's progress plus that span only", () => {
+  const goal = { type: "duration", seconds: 3600 };
+  const activities = [activity("a", { goal, progress: { type: "duration", seconds: 600 } })];
+  const sessions = [
+    live("mine", "a", new Date(2026, 8, 30, 9, 0)),
+    live("theirs", "a", new Date(2026, 8, 30, 9, 40), [THEM]),
+  ];
+  const shared = { ...sessions[1], memberIds: [THEM, ME], currentMemberIds: [THEM, ME] };
+  const result = scene({ activities, sessions: [sessions[0], shared], following: [ME] });
+  assert.equal(result.key, "live:theirs");
+  assert.equal(result.progress.current, 600 + 20 * 60, "only the span the wall shows adds, not every live one");
 });
 
 test("pinned: the first non-archived pin of the workspace, at the pinned level and style", () => {
   const activities = [
     activity("archived", { archived: true, pinned: true }),
     activity("unpinned"),
-    activity("mine", { pinned: true, color: "gold", goal: { type: "count", count: 4 } }),
+    activity("mine", {
+      pinned: true,
+      placedBy: THEM,
+      color: "gold",
+      goal: { type: "count", count: 4 },
+      progress: { type: "count", count: 1 },
+    }),
     activity("second", { pinned: true }),
   ];
-  const sessions = [{
-    id: "done",
-    activityId: "mine",
-    type: "span",
-    status: "completed",
-    memberIds: [THEM],
-    startedAt: new Date(2026, 8, 30, 8, 0),
-    endedAt: new Date(2026, 8, 30, 8, 30),
-  }];
+  const sessions = [];
   const result = scene({ activities, sessions });
   assert.deepEqual(result, {
     kind: "pinned",

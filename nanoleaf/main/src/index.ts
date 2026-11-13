@@ -1,5 +1,6 @@
 /**
- * Nanoleaf: glows Nanoleaf Shapes in the colour of the user's live activity and fills them towards its goal. onStart
+ * Nanoleaf: glows Nanoleaf Shapes in the colour of a live activity and fills them towards its goal. One instance runs
+ * per workspace; the wall follows the member chosen in the interface (storage `zones`), else the owner. onStart
  * wires the Controller (connection, pairing, layout, events) to the Director (scene → frames, hand-back, yield),
  * answers the interface's requests on the private channel (`ctx.ui`) and handles the declared commands: `resume`, the
  * wall's lock for other plugins and Home Assistant, and the two brightness settings (brightness.ts).
@@ -14,8 +15,9 @@ import {
   PluginError,
   type Session,
 } from "@drift-beacon/plugin";
+import { actingFor, speaksTo } from "../../shared/acting-for.ts";
 import { readEffect } from "../../shared/effects.ts";
-import { DEFAULT_PORT, readSettings } from "../../shared/storage.ts";
+import { DEFAULT_PORT, readSettings, readZones } from "../../shared/storage.ts";
 import { type ActivityLike, type FoundController, type SessionLike, STORAGE_KEYS } from "../../shared/types.ts";
 import { BRIGHTNESS_INPUT, DISCOVER_INPUT, NUMBERING_INPUT, PAIR_INPUT, PREVIEW_INPUT } from "../../shared/ui-channel.ts";
 import { brightnessState, saveBrightness } from "./brightness.ts";
@@ -86,8 +88,7 @@ export function startNanoleaf(ctx: MainContext, options: NanoleafPluginOptions =
     discover({ timeoutMs: listenMs, signal, mdns, said, log: (message, error) => log.info(message, error) });
 
   const director = createDirector({
-    userId: ctx.user.id,
-    owner: createOwner(`${ctx.user.id}@${ctx.workspace.id}`),
+    owner: createOwner(ctx.workspace.id),
     data: workspaceData(ctx),
     storage: ctx.storage,
     createClient: (config) =>
@@ -108,8 +109,9 @@ export function startNanoleaf(ctx: MainContext, options: NanoleafPluginOptions =
 
   // Open copies of the interface that are numbering panels (tap to order): their taps on the wall are numbers.
   const numbering = new Set<string>();
+  const following = followingOf(ctx);
   const onGesture = createGestures({
-    userId: ctx.user.id,
+    following,
     settings: () => readSettings(ctx.storage.get(STORAGE_KEYS.settings)),
     data: workspaceData(ctx),
     drafting: () => director.drafting || numbering.size > 0,
@@ -145,7 +147,8 @@ export function startNanoleaf(ctx: MainContext, options: NanoleafPluginOptions =
     director.resume();
   });
   // The lock other plugins and Home Assistant take to put an effect of their own on the wall (P2: under a schedule
-  // alert, over the user's own scene). The caller is the holder: nobody names one.
+  // alert, over the workspace's own scene). The caller is the holder, a plugin or Home Assistant, never a member: it
+  // starts or names nobody's sessions.
   ctx.commands.handle("takeControl", (input, meta) => {
     const effect = readEffect(input.effect);
     if (typeof effect === "string") throw new PluginError("invalid", effect);
@@ -160,18 +163,7 @@ export function startNanoleaf(ctx: MainContext, options: NanoleafPluginOptions =
     ctx.state.set("brightness", brightnessState(readSettings(ctx.storage.get(STORAGE_KEYS.settings))));
   // Bound by the brightness controls: published before onStart returns, then on every change of the settings.
   publishBrightness();
-  ctx.onDataChange(() => director.update());
-  // A schedule fired: the snapshot with its pin came first, so the wall is already on its way to the new scene.
-  ctx.schedules.onTriggered((trigger) => {
-    director.alert(trigger.activityId);
-  });
-  ctx.storage.onChange((key) => {
-    if (key === STORAGE_KEYS.controller) wired.reload();
-    else if (key === STORAGE_KEYS.settings || key === STORAGE_KEYS.order || key === STORAGE_KEYS.layout) {
-      if (key === STORAGE_KEYS.settings) publishBrightness();
-      director.update();
-    }
-  });
+  listen(ctx, director, following, { controller: () => wired.reload(), settings: publishBrightness });
   ctx.onStop(async () => {
     wired.stop();
     await director.stop();
@@ -179,6 +171,44 @@ export function startNanoleaf(ctx: MainContext, options: NanoleafPluginOptions =
 
   director.start();
   wired.start();
+}
+
+/**
+ * Who the wall follows, worked out each time from the stored choice and the members now; never written back. A Drift
+ * Beacon that sends no members gives nobody. Exported for the tests.
+ */
+export function followingOf(ctx: Pick<MainContext, "storage" | "members">): () => readonly string[] {
+  return () => actingFor(readZones(ctx.storage.get(STORAGE_KEYS.zones))[0]?.member, ctx.members ?? []);
+}
+
+/**
+ * What makes the wall think again: a data change, a schedule firing, and a storage write. A schedule's snapshot with
+ * its pin came first, so the wall is already on its way to the new scene; only a schedule that speaks to someone the
+ * wall follows flashes it (one that tells everyone lists every member). A new controller reloads the connection; the
+ * settings, the order, the layout and who the wall follows re-decide the scene. Exported for the tests.
+ */
+export function listen(
+  ctx: Pick<MainContext, "onDataChange" | "schedules" | "storage">,
+  director: Pick<Director, "alert" | "update">,
+  following: () => readonly string[],
+  on: { readonly controller: () => void; readonly settings: () => void },
+): void {
+  ctx.onDataChange(() => director.update());
+  ctx.schedules.onTriggered((trigger) => {
+    if (speaksTo(trigger.members ?? [], following())) director.alert(trigger.activityId);
+  });
+  ctx.storage.onChange((key) => {
+    if (key === STORAGE_KEYS.controller) on.controller();
+    else if (
+      key === STORAGE_KEYS.settings ||
+      key === STORAGE_KEYS.order ||
+      key === STORAGE_KEYS.layout ||
+      key === STORAGE_KEYS.zones
+    ) {
+      if (key === STORAGE_KEYS.settings) on.settings();
+      director.update();
+    }
+  });
 }
 
 /**
@@ -303,9 +333,11 @@ export function requestError(error: unknown): unknown {
 
 /**
  * Workspace data as plain rows, remapped only when the SDK hands out a new list. Archived activities are included:
- * a live session of one still glows, as core's live-activity-slot shows it (decideScene ignores archived pins).
+ * a live session of one still glows, as core's live-activity-slot shows it (decideScene ignores archived pins). A
+ * Drift Beacon that sends no members (`ctx.members` arrived in 0.4.1) gives none, so the wall follows nobody.
+ * Exported for the tests.
  */
-function workspaceData(ctx: MainContext): () => WorkspaceData {
+export function workspaceData(ctx: Pick<MainContext, "activities" | "sessions" | "members">): () => WorkspaceData {
   let activityModels: readonly Activity[] | null = null;
   let sessionModels: readonly Session[] | null = null;
   let activities: readonly ActivityLike[] = [];
@@ -321,28 +353,31 @@ function workspaceData(ctx: MainContext): () => WorkspaceData {
       sessionModels = nextSessions;
       sessions = nextSessions.map((session) => session.data);
     }
-    return { activities, sessions };
+    return { activities, sessions, members: ctx.members ?? [] };
   };
 }
 
 /**
- * What gestures do to the workspace, through the SDK as the user. `pause`, `pin` and `unpin` arrived in SDK 0.2.12:
- * main code runs against the app's own SDK, so on an older Drift Beacon they are missing, and say so.
+ * What gestures do to the workspace, through the SDK: a start or mark for the members it is given, a pause or pin
+ * placed by the member it is given or by nobody (`null`). `pause`, `pin` and `unpin` arrived in SDK 0.2.12: main code
+ * runs against the app's own SDK, so on an older Drift Beacon they are missing, and say so. Exported for the tests.
  */
-function gestureActions(ctx: MainContext): GestureActions {
+export function gestureActions(ctx: MainContext): GestureActions {
   const needs = <T>(fn: T | undefined, what: string): T => {
     if (typeof fn !== "function") throw new PluginError("unsupported", `${what} needs a newer Drift Beacon`);
     return fn;
   };
   return {
-    pause: (sessionId) => needs(ctx.sessions.pause, "Pausing").call(ctx.sessions, sessionId),
+    pause: (sessionId, placedBy) =>
+      needs(ctx.sessions.pause, "Pausing").call(ctx.sessions, sessionId, { placedBy }),
     stop: (sessionId) => ctx.sessions.end(sessionId),
-    track: async (activityId) => {
+    track: async (activityId, members) => {
       const activity = ctx.activities.get(activityId);
       if (!activity) throw new PluginError("not-found", "That activity is gone");
-      return activity.track();
+      return activity.track({ members });
     },
-    pin: (activityId) => needs(ctx.activities.pin, "Pinning").call(ctx.activities, activityId),
+    pin: (activityId, placedBy) =>
+      needs(ctx.activities.pin, "Pinning").call(ctx.activities, activityId, { placedBy }),
     unpin: (activityId) => needs(ctx.activities.unpin, "Unpinning").call(ctx.activities, activityId),
   };
 }

@@ -1,15 +1,35 @@
 // Prototype-only fixture data, shaped like what the plugin sees: activity rows with resolved colours and MDI
 // `iconPath`s (SDK 0.2.2 rows, with goals, periods and pins), session rows, and controller layouts from
 // tests/fixtures. Worst cases on purpose: a very long activity name, colours that aren't hex, a point activity with a
-// count goal, another member's sessions and pins, an archived activity the user still has pinned (the wall must ignore
-// that pin), and a wall of 30+ mixed panels.
+// count goal, another member's sessions, an archived activity still pinned (the wall must ignore that pin), and a wall
+// of 30+ mixed panels. Drift Beacon counts each activity's progress; the sim counts it here (`withProgress`).
 
 import { layoutFromPanelLayout } from "../../../shared/geometry.ts";
-import type { ActivityLike, FoundController, Layout, SessionLike } from "../../../shared/types.ts";
+import type {
+  ActivityLike,
+  ActivityProgress,
+  FoundController,
+  Layout,
+  MemberLike,
+  SessionLike,
+} from "../../../shared/types.ts";
 
+/** The member whose sessions the fixtures mostly hold: the workspace's owner, so the wall follows them at first. */
 export const ME = "u-rich";
-/** Another member of the workspace: their completed sessions count toward shared goals, their pins don't. */
+/** Another member of the workspace: their completed sessions count toward the same goals. */
 export const SAM = "u-sam";
+/** A third member, with a long name. */
+export const ALEX = "u-alex";
+
+/** The workspace's members, as the app sends them: three, one of them the owner. */
+export const MEMBERS: readonly MemberLike[] = [
+  { id: ME, name: "Rich", role: "OWNER" },
+  { id: SAM, name: "Sam", role: "MEMBER" },
+  { id: ALEX, name: "Alexandra Montgomery-Okafor", role: "MEMBER" },
+];
+
+/** An activity as the fixtures write it: Drift Beacon's `progress` and the pin's `placedBy` come later. */
+export type ActivityFixture = Omit<ActivityLike, "progress" | "placedBy">;
 
 export const MDI = {
   laptop:
@@ -32,10 +52,10 @@ export const MDI = {
 } as const;
 
 /**
- * The activities the prototypes use, archived included (as the model carries them), in the app's order; the user's
- * pin among the live ones is set per starting state (`activitiesFor`).
+ * The activities the prototypes use, archived included (as the model carries them), in the app's order; the
+ * workspace's pin among the live ones is set per starting state (`activitiesFor`).
  */
-export const ACTIVITIES: readonly ActivityLike[] = [
+export const ACTIVITIES: readonly ActivityFixture[] = [
   {
     id: "deep-work",
     name: "Deep work",
@@ -176,9 +196,41 @@ const PINNED: Record<StartState, string | null> = {
 };
 
 /** The activities for a starting state: the fixtures with the workspace's pin applied. */
-export function activitiesFor(start: StartState): ActivityLike[] {
+export function activitiesFor(start: StartState): ActivityFixture[] {
   const pinned = PINNED[start];
   return ACTIVITIES.map((a) => ({ ...a, pinned: a.id === pinned }));
+}
+
+/** Start of the local calendar period containing `now`; null (no period) means all history. */
+function periodStart(period: ActivityLike["period"], now: number): number {
+  if (period == null) return -Infinity;
+  const d = new Date(now);
+  d.setHours(0, 0, 0, 0);
+  if (period === "week") d.setDate(d.getDate() - d.getDay());
+  else if (period === "month") d.setDate(1);
+  else if (period === "year") d.setMonth(0, 1);
+  return d.getTime();
+}
+
+/**
+ * The fixtures as the app sends them: each with its progress, counted as Drift Beacon counts it (every member's ended
+ * sessions from the period's start, a running span not counted), and a pin placed by `ME`.
+ */
+export function withProgress(
+  activities: readonly ActivityFixture[],
+  sessions: readonly SessionLike[],
+  now: number,
+): ActivityLike[] {
+  return activities.map((a) => {
+    const from = periodStart(a.period ?? null, now);
+    const ended = sessions.filter(
+      (s) => s.activityId === a.id && s.status === "completed" && s.startedAt.getTime() >= from,
+    );
+    const ms = ended.reduce((sum, s) => sum + (s.endedAt ? s.endedAt.getTime() - s.startedAt.getTime() : 0), 0);
+    const progress: ActivityProgress =
+      a.goal?.type === "duration" ? { type: "duration", seconds: ms / 1000 } : { type: "count", count: ended.length };
+    return { ...a, progress, placedBy: a.pinned ? ME : null };
+  });
 }
 
 const MIN = 60_000;
@@ -195,6 +247,7 @@ function span(activityId: string, start: number, minutes: number, members: reado
     type: "span",
     status: "completed",
     memberIds: members,
+    currentMemberIds: [],
     startedAt: new Date(start),
     endedAt: new Date(start + minutes * MIN),
   };
@@ -207,12 +260,13 @@ function point(activityId: string, at: number, members: readonly string[] = [ME]
     type: "point",
     status: "completed",
     memberIds: members,
+    currentMemberIds: [],
     startedAt: new Date(at),
     endedAt: null,
   };
 }
 
-/** A live span of `activityId` for the user, started `minutes` ago. */
+/** A live span of `activityId` that `ME` is in, started `minutes` ago. */
 export function liveSpan(activityId: string, now: number, minutes: number): SessionLike {
   return {
     id: nextSessionId(),
@@ -220,6 +274,7 @@ export function liveSpan(activityId: string, now: number, minutes: number): Sess
     type: "span",
     status: "live",
     memberIds: [ME],
+    currentMemberIds: [ME],
     startedAt: new Date(now - minutes * MIN),
     endedAt: null,
   };

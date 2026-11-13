@@ -1,9 +1,18 @@
 import type { MainApi, PluginPeerOf, PluginStatus, UiContext } from "@drift-beacon/plugin/ui";
 import { useEffect, useMemo, useState } from "react";
-import { readController, readLayout, readOrder, readSettings, sameLayout } from "../../shared/storage.ts";
+import {
+  readController,
+  readLayout,
+  readOrder,
+  readSettings,
+  readZones,
+  sameLayout,
+  zonesFollowing,
+} from "../../shared/storage.ts";
 import {
   type ActivityLike,
   type ConnectionInfo,
+  type MemberLike,
   type OutputInfo,
   type PanelOrder,
   type SessionLike,
@@ -31,6 +40,8 @@ const RESUME_TIMEOUT_MS = 3000;
  * "Waiting for Drift Beacon" (contract P19), which normally clears well within this; a real failure shows this late.
  */
 export const STATUS_WAIT_MS = 3000;
+
+const NO_MEMBERS: readonly MemberLike[] = Object.freeze([]);
 
 const GESTURES: readonly TouchGesture[] = ["tap", "double-tap", "swipe-up", "swipe-down", "swipe-left", "swipe-right"];
 
@@ -237,6 +248,7 @@ export function useLiveModel(): NanoleafModel {
   // One reader per value, kept for the page's life: each returns its previous object until the value really changes.
   const [read] = useState(() => ({
     settings: stableReader(readSettings),
+    zones: stableReader(readZones),
     order: stableReader(readOrder),
     layout: stableReader(readLayout, sameLayout),
     controller: stableReader(controllerView),
@@ -245,6 +257,9 @@ export function useLiveModel(): NanoleafModel {
     control: stableReader((raw: unknown) => raw ?? null),
   }));
   const settings = read.settings(ctx.storage.get(STORAGE_KEYS.settings));
+  const zones = read.zones(ctx.storage.get(STORAGE_KEYS.zones));
+  // The roster keeps its identity until it changes; an app that sends none gives an empty list.
+  const members = ctx.members ?? NO_MEMBERS;
   const order = read.order(ctx.storage.get(STORAGE_KEYS.order));
   const layout = read.layout(ctx.storage.get(STORAGE_KEYS.layout));
   const controller = read.controller(ctx.storage.get(STORAGE_KEYS.controller));
@@ -296,6 +311,10 @@ export function useLiveModel(): NanoleafModel {
       saveOrder(next: PanelOrder) {
         return loggedWrite(ctx.storage.set(STORAGE_KEYS.order, { ...next, ids: [...next.ids] }), "panel order");
       },
+      saveZoneMember(member) {
+        const zones = zonesFollowing(ctx.storage.get(STORAGE_KEYS.zones), member);
+        return loggedWrite(ctx.storage.set(STORAGE_KEYS.zones, zones), "member to follow");
+      },
       discover: channel.discover,
       pair: channel.pair,
       forget: channel.forget,
@@ -331,10 +350,11 @@ export function useLiveModel(): NanoleafModel {
 
   return useMemo<NanoleafModel>(
     () => ({
-      userId: ctx.user.id,
       activities,
       sessions,
       settings,
+      members,
+      zones,
       order,
       layout,
       controller,
@@ -350,10 +370,11 @@ export function useLiveModel(): NanoleafModel {
       onResync: channel.onResync,
     }),
     [
-      ctx.user.id,
       activities,
       sessions,
       settings,
+      members,
+      zones,
       order,
       layout,
       controller,

@@ -3,7 +3,7 @@
  * the connection the Controller hands the Director. index.ts plugs in `ctx` and the real clients; tests plug in fakes.
  */
 import type { PanelRgb } from "../../shared/protocol.ts";
-import type { ActivityLike, ConnectionStatus, ControllerConfig, SessionLike } from "../../shared/types.ts";
+import type { ActivityLike, ConnectionStatus, ControllerConfig, MemberLike, SessionLike } from "../../shared/types.ts";
 import type { HandbackClient } from "./handback.ts";
 import type { RequestOptions } from "./nanoleaf/http.ts";
 
@@ -40,6 +40,8 @@ export interface StoragePort {
 export interface WorkspaceData {
   readonly activities: readonly ActivityLike[];
   readonly sessions: readonly SessionLike[];
+  /** The workspace's members now (`ctx.members`); empty from a Drift Beacon that sends none. */
+  readonly members: readonly MemberLike[];
 }
 
 /** What the Director knows of the connection (from controller.ts). */

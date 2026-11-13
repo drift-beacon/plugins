@@ -58,7 +58,7 @@ const WALL: readonly SimButton[] = [
     action: { type: "control" },
   },
   { key: "W", label: "Touch", title: "Tap a random panel on the wall", action: { type: "tap" } },
-  { key: "B", label: "Busy", title: "Another user's instance holds the controller", action: { type: "busy" } },
+  { key: "B", label: "Busy", title: "Another workspace's instance holds the controller", action: { type: "busy" } },
   { key: "M", label: "Main", title: "Main stops running (again to restart)", action: { type: "main" } },
   {
     key: "D",
@@ -71,6 +71,12 @@ const WALL: readonly SimButton[] = [
     label: "Old app",
     title: "The app doesn't send goals or pins (SDK < 0.2.2)",
     action: { type: "old-app" },
+  },
+  {
+    key: "N",
+    label: "One member",
+    title: "The workspace has only its owner (again for three members): the wall follows them, with no picker",
+    action: { type: "one-member" },
   },
 ];
 

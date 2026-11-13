@@ -265,7 +265,7 @@ export function noticesFor(model: NanoleafModel, handlers: NoticeHandlers): Noti
       tone: "warning",
       icon: <Users />,
       title: "Someone else is driving this wall",
-      body: [sentence(output.detail ?? "Another Drift Beacon user or workspace has it"), BUSY_AFTER].join(" "),
+      body: [sentence(output.detail ?? "Another Drift Beacon workspace has it"), BUSY_AFTER].join(" "),
     });
   } else if (output?.mode === "yielded") {
     out.push({

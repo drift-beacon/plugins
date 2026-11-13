@@ -117,12 +117,19 @@ const has = (node, attr) => Object.hasOwn(node.attrs, attr);
 const activity = (id, name, extra = {}) => ({ id, name, color: "#60a5fa", iconPath: "M0 0H24V24H0Z", categoryId: null, categoryName: null, archived: false, point: false, ...extra });
 const ACTIVITIES = [activity("deep", "Deep work"), activity("gym", "Gym"), activity("water", "Glass of water", { point: true, iconPath: null })];
 
-function model({ slot = null, mappings = { [TAG]: "deep", [OTHER]: "gym" }, live = [], history = [], devices, unknown = [], ...patch } = {}) {
+const MEMBERS = [
+  { id: "m-alex", name: "Alex", role: "OWNER" },
+  { id: "m-sam", name: "Sam", role: "MEMBER" },
+  { id: "m-riley", name: "Riley", role: "MEMBER" },
+];
+
+function model({ slot = null, mappings = { [TAG]: "deep", [OTHER]: "gym" }, live = [], history = [], devices, unknown = [], chosen = [], ...patch } = {}) {
   const refuse = () => Promise.reject(new Error("no request is made while rendering"));
   return {
     activities: ACTIVITIES,
     lookup: ui.byId(ACTIVITIES),
     categories: [],
+    members: MEMBERS,
     live,
     mappings: readMappings(mappings),
     record: readPlayerRecord({
@@ -130,7 +137,7 @@ function model({ slot = null, mappings = { [TAG]: "deep", [OTHER]: "gym" }, live
       devices: devices ?? { [DEVICE]: { name: "Cartridge-A1B2", fw: "2.0.0", slot, lastHeardAt: iso(NOW - 60_000), hubHost: "192.168.1.12:9821" } },
       active: devices ? null : DEVICE,
       unknown,
-      cartridges: { [TAG]: { seenAt: iso(NOW - 3_600_000), plays: 4, playedMs: 7_200_000 } },
+      cartridges: { [TAG]: { members: chosen, seenAt: iso(NOW - 3_600_000), plays: 4, playedMs: 7_200_000 } },
       history,
       nextId: history.length + 1,
     }),
@@ -140,7 +147,7 @@ function model({ slot = null, mappings = { [TAG]: "deep", [OTHER]: "gym" }, live
     reading: null,
     apiPath: "/api/plugins/cartridge-player/api",
     pageHost: "192.168.1.12",
-    actions: { label: refuse, forget: refuse, dismiss: refuse, start: refuse },
+    actions: { label: refuse, setMembers: refuse, forget: refuse, dismiss: refuse, start: refuse },
     ...patch,
   };
 }
@@ -322,6 +329,36 @@ test("render: a cartridge's details offer Forget unless it's tracking or in a pl
   assert.match(tracking.text, /If it's already out and its player hasn't said so, end the session in Drift Beacon; then it can be forgotten\./);
   // Read-only while main isn't running, whatever the slot says.
   assert.ok(has(details({ slot: idle, presence: null, mainStatus: "unavailable" }).button("Forget cartridge"), "disabled"));
+});
+
+test("render: a cartridge's details say whom it tracks for, one chip per member, in a workspace of more than one", () => {
+  const details = (patch) => {
+    const value = model(patch);
+    const item = ui.buildLibrary(value.mappings, value.record, value.lookup, value.live).find((entry) => entry.tag === TAG);
+    const props = { item, now: NOW, readOnly: value.mainStatus !== "running", onRelabelled() {}, onForgotten() {} };
+    return render(value, ui.createElement(ui.CartridgeDetails, props));
+  };
+  const chips = (view) => view.buttons.filter((button) => has(button, "aria-pressed"));
+  const ticked = (view) => chips(view).filter((chip) => chip.attrs["aria-pressed"] === "true").map(nameOf);
+
+  const picked = details({ chosen: ["m-riley", "m-sam"] });
+  assert.match(picked.text, /Tracks for Putting this cartridge in starts its activity for the people you pick\./);
+  assert.deepEqual(chips(picked).map(nameOf), ["Alex", "Riley", "Sam"]);
+  assert.deepEqual(ticked(picked), ["Riley", "Sam"]);
+  const group = findAll(picked.tree, (n) => n.attrs.role === "group" && has(n, "aria-labelledby"))[0];
+  assert.equal(squash(spoken(findAll(picked.tree, (n) => n.attrs.id === group.attrs["aria-labelledby"])[0])), "Tracks for");
+  // Nobody picked, or only people who have left: the owner.
+  assert.deepEqual(ticked(details({})), ["Alex"]);
+  assert.deepEqual(ticked(details({ chosen: ["m-gone"] })), ["Alex"]);
+  // A workspace of one, and an app that sends no members: no row.
+  for (const members of [MEMBERS.slice(0, 1), []]) {
+    const view = details({ members });
+    assert.doesNotMatch(view.text, /Tracks for/);
+    assert.equal(chips(view).length, 0);
+  }
+  // Read-only while main isn't running.
+  const readOnly = details({ presence: null, mainStatus: "unavailable" });
+  assert.ok(chips(readOnly).every((chip) => has(chip, "disabled")));
 });
 
 test("render: a player main is still waiting to hear from is a quiet pill, where an offline one is marked", () => {

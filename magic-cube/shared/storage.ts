@@ -33,3 +33,13 @@ export interface LastRollState {
   mapping: Mapping | null;
 }
 export const UNCATEGORIZED_ID = 'uncategorized';
+
+/**
+ * `rollsFor`: the member ids every roll is for, in its own record so a settings write can't overwrite it. Only the UI
+ * writes it. Anything that isn't a non-empty string is dropped; undefined when nothing usable is stored.
+ */
+export function readRollsFor(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const ids = value.filter((id): id is string => typeof id === 'string' && id.length > 0);
+  return ids.length > 0 ? ids : undefined;
+}

@@ -6,19 +6,20 @@
  * schemas and `SAVE_REFUSED`), and its import of "@drift-beacon/plugin" (not /ui) is what makes the augmentation apply
  * in the UI too.
  *
- * Refusals are `PluginError`s: `invalid` for a bad tag or activity, or forgetting a cartridge that's in a player for
- * certain (see `forget`); `not-found` when there's nothing to start; `failed` with `SAVE_REFUSED` when storage
- * refused a write a label, forget or dismiss made: the request didn't go through, and sending it again is safe. A
- * `start` whose session action was rejected has written the reason on the slot (outcome `error`) and rejects with that
- * action's own error: its code is the app's, not a verdict on the plugin (`failed` with the action's message when it
- * wasn't a PluginError). Every request rejects `stopped` while main is stopping.
+ * Refusals are `PluginError`s: `invalid` for a bad tag, activity or choice of members, or forgetting a cartridge that's
+ * in a player for certain (see `forget`); `not-found` when there's nothing to start; `failed` with `SAVE_REFUSED` when
+ * storage refused a write a label, members, forget or dismiss made: the request didn't go through, and sending it
+ * again is safe. A `start` whose session action was rejected, or that had nobody to start for, has written the reason
+ * on the slot (outcome `error`) and rejects with that action's own error: its code is the app's, not a verdict on the
+ * plugin (`failed` with the action's message when it wasn't a PluginError). Every request rejects `stopped` while main
+ * is stopping.
  */
 import type { ValueSchema } from "@drift-beacon/plugin";
 import type { Tag } from "./tags.ts";
 
 /**
- * The message of the `failed` refusal main gives when storage wouldn't take a label, forget or dismiss. `failed` is
- * also the platform's code for a handler that threw, so the interface tells the two apart by this sentence.
+ * The message of the `failed` refusal main gives when storage wouldn't take a label, members, forget or dismiss.
+ * `failed` is also the platform's code for a handler that threw, so the interface tells the two apart by this sentence.
  */
 export const SAVE_REFUSED = "Couldn't save it; try again";
 
@@ -31,6 +32,12 @@ export interface LabelResult {
   readonly inSlot: boolean;
 }
 
+export interface MembersResult {
+  readonly tag: Tag;
+  /** The members it tracks for now, as stored. */
+  readonly members: readonly string[];
+}
+
 export interface StartResult {
   readonly activityId: string;
   readonly sessionId: string | null;
@@ -39,8 +46,20 @@ export interface StartResult {
 
 declare module "@drift-beacon/plugin" {
   interface PluginUiRequests {
-    /** Label a cartridge (new or not) with an activity. */
-    label: { input: { readonly tag: string; readonly activityId: string }; output: LabelResult };
+    /**
+     * Label a cartridge (new or not) with an activity. `members`, when given, is whom it tracks for from now on.
+     * Otherwise a cartridge labelled for the first time tracks for the member who labels it, and one labelled again
+     * keeps its members.
+     */
+    label: {
+      input: { readonly tag: string; readonly activityId: string; readonly members?: readonly string[] };
+      output: LabelResult;
+    };
+    /**
+     * Whom a labelled cartridge tracks for: one or more members of the workspace, repeats dropped. It applies the next
+     * time the cartridge goes in or Start is pressed; a running session keeps the people in it.
+     */
+    members: { input: { readonly tag: string; readonly members: readonly string[] }; output: MembersResult };
     /**
      * Forget a labelled cartridge: next time it goes in it's new. Refused (`invalid`, "Take it out of the player
      * first") only while it's in a player for certain: the slot holding it has a live session, or the player holding
@@ -50,7 +69,10 @@ declare module "@drift-beacon/plugin" {
     forget: { input: { readonly tag: string }; output: { readonly forgotten: boolean } };
     /** Drop an unlabelled cartridge from the list without labelling it. */
     dismiss: { input: { readonly tag: string }; output: { readonly dismissed: boolean } };
-    /** Start (or mark) the labelled cartridge in a player's slot: the active player's unless `deviceId` says. */
+    /**
+     * Start (or mark) the labelled cartridge in a player's slot, for its members: the active player's unless
+     * `deviceId` says.
+     */
     start: { input: { readonly deviceId?: string }; output: StartResult };
   }
   interface PluginUiMessages {
@@ -67,11 +89,18 @@ declare module "@drift-beacon/plugin" {
 /* The inputs main checks before a handler runs (`ctx.ui.handle(name, handler, { input })`). Objects are closed. */
 
 const TAG: ValueSchema = { type: "string", title: "Cartridge UID" };
+const MEMBERS: ValueSchema = { type: "array", items: { type: "string" } };
 
 export const LABEL_INPUT: ValueSchema = {
   type: "object",
-  properties: { tag: TAG, activityId: { type: "string" } },
+  properties: { tag: TAG, activityId: { type: "string" }, members: MEMBERS },
   required: ["tag", "activityId"],
+};
+
+export const MEMBERS_INPUT: ValueSchema = {
+  type: "object",
+  properties: { tag: TAG, members: MEMBERS },
+  required: ["tag", "members"],
 };
 
 export const TAG_INPUT: ValueSchema = { type: "object", properties: { tag: TAG }, required: ["tag"] };

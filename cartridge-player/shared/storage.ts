@@ -1,10 +1,10 @@
 /**
- * The plugin's storage, per user and workspace. Main is its only writer: the interface changes it through the
- * private channel (shared/ui-channel.ts), so a device event and a label can never overwrite each other. Every read
- * goes through a reader here, because storage can hold anything (an older version, another device, a JSON editor): a
- * bad field falls back to its default and callers never see a half-valid value.
+ * The plugin's storage, one per workspace, shared by its members. Main is its only writer: the interface changes it
+ * through the private channel (shared/ui-channel.ts), so a device event and a label can never overwrite each other.
+ * Every read goes through a reader here, because storage can hold anything (an older version, another device, a JSON
+ * editor): a bad field falls back to its default and callers never see a half-valid value.
  *
- * - `tagMappings`: tag → activity id, the user's labelled cartridges.
+ * - `tagMappings`: tag → activity id, the workspace's labelled cartridges.
  * - `player`: everything else main knows (`PlayerRecord`), one record so an event updates it in one write.
  */
 import { normalizeTag, type Tag } from "./tags.ts";
@@ -20,7 +20,8 @@ export type TagMappings = Readonly<Record<Tag, string>>;
  * - idle: labelled and in the slot, but nothing was started for it: it was labelled or relabelled while in and not
  *   playing (which also clears a failed start): the interface offers to start it
  * - unknown: not labelled; orphan / archived: its activity was deleted / is archived, so nothing started
- * - error: starting failed; `error` says why
+ * - error: starting failed, or there was nobody to start it for; `error` says why, and `lateFor` whom the start may
+ *   still have run for
  * Whether a started session is still live is read from the workspace (`sessionId`), never stored.
  */
 export type SlotOutcome = "started" | "marked" | "resumed" | "idle" | "unknown" | "orphan" | "archived" | "error";
@@ -45,6 +46,12 @@ export interface Slot {
   readonly sessionId: string | null;
   readonly outcome: SlotOutcome;
   readonly error: string | null;
+  /**
+   * In outcome `error`, when the refused start may still have run (the host stops waiting for an action after 10 s):
+   * the members it named, never none. A live span of the activity started for them since `since` is this cartridge's
+   * session. Null otherwise.
+   */
+  readonly lateFor: readonly string[] | null;
 }
 
 export interface DeviceRecord {
@@ -74,6 +81,11 @@ export interface UnknownTag {
  * cartridge is labelled, goes in or comes out; a labelled cartridge without one has no stats yet (`NO_STATS`).
  */
 export interface CartridgeStats {
+  /**
+   * The members it tracks for, as chosen ("Tracks for"); none chosen yet is empty. Who it starts for is worked out
+   * from this each time (shared/acting-for.ts `actingFor`).
+   */
+  readonly members: readonly string[];
   /** When it last went in or came out (ISO), or null if never since it was labelled. */
   readonly seenAt: string | null;
   /** Sessions it started or adopted. */
@@ -126,9 +138,14 @@ export interface PlayerRecord {
 }
 
 /** The stats of a labelled cartridge that has none recorded yet. */
-export const NO_STATS: CartridgeStats = Object.freeze({ seenAt: null, plays: 0, playedMs: 0 });
+export const NO_STATS: CartridgeStats = Object.freeze({
+  members: Object.freeze([]),
+  seenAt: null,
+  plays: 0,
+  playedMs: 0,
+});
 
-export const LIMITS = Object.freeze({ devices: 4, unknown: 20, history: 50 });
+export const LIMITS = Object.freeze({ devices: 4, unknown: 20, history: 50, members: 50 });
 /** A heartbeat on its own writes `lastHeardAt` at most this often; presence itself is published state. */
 export const PRESENCE_WRITE_MS = 15 * 60_000;
 
@@ -145,6 +162,12 @@ const text = (value: unknown, max = 200): string | null =>
   typeof value === "string" && value.length > 0 ? value.slice(0, max) : null;
 const count = (value: unknown): number =>
   typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+/** Member ids: non-empty strings, without repeats, at most LIMITS.members. A single id reads as a list of one. */
+const ids = (value: unknown): string[] => {
+  const list = typeof value === "string" ? [value] : Array.isArray(value) ? value : [];
+  const kept = list.map((item) => text(item)).filter((item): item is string => item !== null);
+  return [...new Set(kept)].slice(0, LIMITS.members);
+};
 const u32 = (value: unknown): number | null =>
   Number.isInteger(value) && (value as number) >= 0 && (value as number) <= 0xffff_ffff ? (value as number) : null;
 
@@ -170,6 +193,7 @@ function readSlot(value: unknown): Slot | null {
   const since = iso(value.since);
   if (!tag || !since) return null;
   const outcome = OUTCOMES.includes(value.outcome as SlotOutcome) ? (value.outcome as SlotOutcome) : "idle";
+  const lateFor = ids(value.lateFor);
   return {
     tag,
     since,
@@ -177,6 +201,7 @@ function readSlot(value: unknown): Slot | null {
     sessionId: text(value.sessionId),
     outcome,
     error: text(value.error, 300),
+    lateFor: lateFor.length > 0 ? lateFor : null,
   };
 }
 
@@ -236,7 +261,12 @@ export function readPlayerRecord(value: unknown): PlayerRecord {
     for (const [key, raw] of Object.entries(value.cartridges)) {
       const tag = normalizeTag(key);
       if (tag && isRecord(raw))
-        cartridges[tag] = { seenAt: iso(raw.seenAt), plays: count(raw.plays), playedMs: count(raw.playedMs) };
+        cartridges[tag] = {
+          members: ids(raw.members),
+          seenAt: iso(raw.seenAt),
+          plays: count(raw.plays),
+          playedMs: count(raw.playedMs),
+        };
     }
   }
   const history = (Array.isArray(value.history) ? value.history : [])

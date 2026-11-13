@@ -3,7 +3,7 @@
   "name": "Cartridge Player",
   "icon": "icon.png",
   "version": "2.1.0",
-  "apiVersion": "0.3",
+  "apiVersion": "0.4",
   "description": "Slide a labelled NFC cartridge into the player to start its activity, and pull it out to stop",
   "author": {
     "name": "@rshallam"

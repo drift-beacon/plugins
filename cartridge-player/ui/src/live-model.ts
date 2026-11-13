@@ -9,7 +9,7 @@ import type { PlayerModel } from "./model.ts";
 import { mainStatusOf, STATUS_WAIT_MS } from "./view/main-status.ts";
 import type { ReadingBeat } from "./view/phase.ts";
 import { readPresence } from "./view/presence.ts";
-import { type ActivityView, byId, type CategoryView, type LiveSession } from "./view/types.ts";
+import { type ActivityView, byId, type CategoryView, type LiveSession, type MemberView } from "./view/types.ts";
 
 /** Its own peer, or null when this Drift Beacon doesn't share plugin status with UIs. */
 function selfOf(ctx: UiContext): PluginPeerOf<"cartridge-player"> | null {
@@ -41,13 +41,16 @@ export function useLiveModel(): PlayerModel {
     activities: stableRows<ActivityView>(),
     categories: stableRows<CategoryView>(),
     live: stableRows<LiveSession>(),
+    members: stableRows<MemberView>(),
   }));
 
   // The SDK's lists keep their identity until any workspace collection changes; the rows are rebuilt then, and
   // `stableRows` hands back the ones (and the list) that came out the same.
   const activityList = ctx.activities.list({ includeArchived: true });
   const categoryList = ctx.categories.list();
-  const liveList = ctx.sessions.live({ mine: true });
+  const liveList = ctx.sessions.live();
+  // None from an app that sends no roster.
+  const memberList = ctx.members ?? [];
   const activities = useMemo(
     () =>
       read.activities(
@@ -86,6 +89,11 @@ export function useLiveModel(): PlayerModel {
     [read, liveList],
   );
 
+  const members = useMemo(
+    () => read.members(memberList.map((member): MemberView => ({ id: member.id, name: member.name, role: member.role }))),
+    [read, memberList],
+  );
+
   const mappings = read.mappings(ctx.storage.get(STORAGE_KEYS.mappings));
   const record = read.record(ctx.storage.get(STORAGE_KEYS.player));
   const presence: PresenceState | null = read.presence(self?.state.get("player"));
@@ -110,6 +118,7 @@ export function useLiveModel(): PlayerModel {
       activities,
       lookup,
       categories,
+      members,
       live,
       mappings,
       record,
@@ -121,6 +130,6 @@ export function useLiveModel(): PlayerModel {
       pageHost: window.location.hostname,
       actions: channel.actions,
     }),
-    [activities, lookup, categories, live, mappings, record, presence, mainStatus, mainStatusReason, reading, ctx.plugin.apiPath, channel],
+    [activities, lookup, categories, members, live, mappings, record, presence, mainStatus, mainStatusReason, reading, ctx.plugin.apiPath, channel],
   );
 }

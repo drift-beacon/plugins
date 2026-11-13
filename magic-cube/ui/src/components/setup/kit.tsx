@@ -1,5 +1,8 @@
 import {
 Button,
+Popover,
+PopoverContent,
+PopoverTrigger,
 Tooltip
 } from "@heroui/react";
 import { cn } from "@heroui/theme";
@@ -26,7 +29,7 @@ toggleRouletteActivity,
 type Workspace
 } from "./model";
 import { EASE_IN_OUT,EASE_OUT,SPRING_POP,SPRING_SETTLE,SPRING_SNAP } from "./motion";
-import { PickerPopover } from "./picker";
+import { PickerPopover,POP_MOTION } from "./picker";
 import type { LiveView,Roll } from "./runtime";
 import { Pips } from "./shared";
 
@@ -431,6 +434,7 @@ export function RoulettePool({ ws }: { ws: Workspace }) {
             color={x.color}
             iconPath={x.iconPath}
             on={!off.has(x.id)}
+            title={off.has(x.id) ? `Put ${x.name} back in the draw` : `Take ${x.name} out of the draw`}
             onToggle={() => {
               const next = toggleRouletteActivity(ws.setup, x.id);
               if (!next) return false;
@@ -444,7 +448,11 @@ export function RoulettePool({ ws }: { ws: Workspace }) {
   );
 }
 
-function PoolChip({ name, color, iconPath, on, onToggle }: { name: string; color: string; iconPath: string; on: boolean; onToggle: () => boolean }) {
+/**
+ * One toggle in a multi-select whose last one on can't go off: `onToggle` answers false for that, and the chip gives a
+ * small "no" shake. Off, it shows `iconPath`, or else the name's first letter, and crossed out when `strike` says so.
+ */
+export function PoolChip({ name, color, iconPath, on, onToggle, title, strike = true }: { name: string; color: string; iconPath?: string; on: boolean; onToggle: () => boolean; title?: string; strike?: boolean }) {
   const [scope, animate] = useAnimate<HTMLButtonElement>();
   const reduced = useReducedMotion();
   return (
@@ -452,7 +460,7 @@ function PoolChip({ name, color, iconPath, on, onToggle }: { name: string; color
       ref={scope}
       type="button"
       aria-pressed={on}
-      title={on ? `Take ${name} out of the draw` : `Put ${name} back in the draw`}
+      title={title}
       variants={{ hidden: { opacity: 0, transform: "translateY(4px)" }, shown: { opacity: 1, transform: "translateY(0px)" } }}
       transition={{ duration: 0.2, ease: EASE_OUT }}
       onClick={() => {
@@ -475,12 +483,12 @@ function PoolChip({ name, color, iconPath, on, onToggle }: { name: string; color
             </motion.span>
           ) : (
             <motion.span key="off" initial={{ opacity: 0, scale: 0.7 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.7 }} transition={{ duration: 0.15, ease: EASE_OUT }}>
-              <Icon path={iconPath} className="h-3 w-3" />
+              {iconPath ? <Icon path={iconPath} className="h-3 w-3" /> : <span className="text-[10px] font-semibold leading-none">{initial(name)}</span>}
             </motion.span>
           )}
         </AnimatePresence>
       </span>
-      <span className={cn("truncate", !on && "line-through decoration-default-400/60")}>{name}</span>
+      <span className={cn("truncate", !on && strike && "line-through decoration-default-400/60")}>{name}</span>
     </motion.button>
   );
 }
@@ -603,6 +611,53 @@ export function LightsToggle({ ws, className }: { ws: Workspace; className?: str
         <Glyph className="h-4 w-4" />
       </button>
     </Tooltip>
+  );
+}
+
+/** A name's first letter, for a member's badge. */
+const initial = (name: string) => name.trim().charAt(0).toUpperCase() || "?";
+/** The member chips' colour: people have none of their own. */
+const MEMBER_COLOR = "#a1a1aa";
+
+/**
+ * Who every roll is for: a button with the chosen members' initials that opens their chips. Hidden in a workspace of
+ * one, where every roll is for its only member, and with no roster to pick from.
+ */
+export function RollsFor({ members, chosen, onToggle, className }: { members: readonly { id: string; name: string }[]; chosen: readonly string[]; onToggle: (id: string) => boolean; className?: string }) {
+  if (members.length <= 1) return null;
+  const picked = chosen.map((id) => members.find((m) => m.id === id)).filter((m): m is { id: string; name: string } => !!m);
+  // At most two badges, so the phone's bar keeps room for the preset's name.
+  const shown = picked.length > 2 ? picked.slice(0, 1) : picked;
+  const more = picked.length - shown.length;
+  return (
+    <Popover placement="bottom-end" offset={10} triggerScaleOnOpen={false} shouldBlockScroll={false} motionProps={POP_MOTION}
+      classNames={{ content: "overflow-hidden rounded-2xl border-none bg-content1 p-0 shadow-2xl ring-1 ring-default-200" }}>
+      <PopoverTrigger>
+        <button
+          type="button"
+          aria-label={`Rolls are for ${picked.map((m) => m.name).join(", ")}`}
+          className={cn("flex h-9 shrink-0 items-center rounded-xl bg-default-100 px-2 transition-transform duration-150 active:scale-[0.96]", className)}
+        >
+          {shown.map((m, i) => (
+            <span key={m.id} aria-hidden className={cn("grid h-6 w-6 place-items-center rounded-full bg-default-300 text-[11px] font-semibold text-foreground ring-2 ring-default-100", i > 0 && "-ml-1.5")}>{initial(m.name)}</span>
+          ))}
+          {more > 0 && <span aria-hidden className="-ml-1.5 grid h-6 w-6 place-items-center rounded-full bg-default-200 text-[10px] font-semibold text-default-600 ring-2 ring-default-100">+{more}</span>}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent>
+        <div className="w-[min(300px,calc(100vw-32px))] space-y-2.5 p-4">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wider text-default-400">Rolls are for</div>
+            <p className="mt-1 text-xs text-default-500">Every roll starts for the people you pick.</p>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {members.map((m) => (
+              <PoolChip key={m.id} name={m.name} color={MEMBER_COLOR} on={chosen.includes(m.id)} strike={false} onToggle={() => onToggle(m.id)} />
+            ))}
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -849,6 +904,7 @@ export function ResultBody({
                     className="font-semibold"
                     startContent={isPoint ? <Check className="h-4 w-4" strokeWidth={3} /> : <Play className="h-4 w-4" />}
                     isLoading={busy}
+                    isDisabled={!roll.canStart}
                     onPress={onTrack}
                   >
                     {isPoint ? "Mark" : "Start"}
