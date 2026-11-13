@@ -17,7 +17,7 @@ Based on the cartridge player from [StockPot](https://www.thestockpot.net/cartri
 
 ## What you need
 
-- Drift Beacon **0.2.4** or later.
+- Drift Beacon with plugins shared by the whole workspace (plugin SDK **0.4.1** or later). An earlier Drift Beacon can't install this version of the plugin.
 - A Cartridge Player on **firmware 2.x**, on the same local network as your hub.
 - A **workspace API key** (Workspace settings → API Keys).
 

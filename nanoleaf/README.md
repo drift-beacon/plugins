@@ -32,7 +32,7 @@ On a split wall, a tap or double tap acts for the zone you touch. A swipe acts f
 
 ## What you need
 
-- Drift Beacon **0.2.4** or later.
+- Drift Beacon with plugins shared by the whole workspace (plugin SDK **0.4.1** or later). An earlier Drift Beacon can't install this version of the plugin.
 - A Nanoleaf Shapes controller on the same local network as your Drift Beacon server. Canvas, Elements and the old Light Panels don't light.
 
 ## Set up
