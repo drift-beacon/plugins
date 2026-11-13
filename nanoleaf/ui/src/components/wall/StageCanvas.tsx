@@ -1,9 +1,8 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { type KeyboardEvent, memo, useCallback, useId, useMemo, useRef } from "react";
+import { type KeyboardEvent, memo, type PointerEvent, useCallback, useId, useMemo, useRef } from "react";
 import { cssRgb, WARM_WHITE } from "../../../../shared/color.ts";
-import type { FillSpan, Rgb } from "../../../../shared/types.ts";
-import { type FrameWriter, useLights } from "../../hooks/useLights.ts";
-import type { RenderStateRef } from "../../hooks/useRenderState.ts";
+import type { Rgb } from "../../../../shared/types.ts";
+import { type FrameWriter, type LightSourceRef, useLights } from "../../hooks/useLights.ts";
 import { floorGlow, panelOpacity } from "../../lib/light.ts";
 import { panelName } from "../../lib/panels.ts";
 import { EASE_OUT } from "../../motion.ts";
@@ -23,13 +22,39 @@ export interface PanelFlash {
   readonly n: number;
 }
 
+/** Choosing panels for a zone: its panels stand out in its tag colour, the rest dim, and panels take presses. */
+export interface ChoosingMarks {
+  readonly name: string;
+  /** What the drawing says meanwhile (zoneMarks.ts `choosingLabel`). */
+  readonly label: string;
+  readonly rgb: Rgb;
+  readonly panels: ReadonlySet<number>;
+  /** Its outer edge, in stage pixels (zoneMarks.ts `zoneOutline`). */
+  readonly outline: string;
+}
+
+/** Presses while choosing panels: a press on a panel, each new panel a held pointer crosses, and the release. */
+export interface PanelPresses {
+  onPanelDown(id: number): void;
+  onPanelDrag(id: number): void;
+  /** `tap`: released where it was pressed, without crossing to another panel; false when it left the drawing. */
+  onPanelUp(tap: boolean): void;
+}
+
+/** A tag colour over a chosen panel, and how much the others dim. */
+const CHOSEN_TINT = 0.5;
+const OTHERS_DIM = 0.62;
+
+function panelUnder(x: number, y: number): number | null {
+  const el = document.elementFromPoint(x, y)?.closest("[data-panel]");
+  const id = el ? Number(el.getAttribute("data-panel")) : Number.NaN;
+  return Number.isFinite(id) ? id : null;
+}
+
 interface StageCanvasProps {
   readonly stage: Stage;
-  readonly stateRef: RenderStateRef;
-  /** The resolved fill order the lights follow. */
-  readonly order: readonly number[];
-  /** Each panel's share of a goal when the order fills as a line (null one panel at a time). */
-  readonly spans?: readonly FillSpan[] | null;
+  /** What the light loop draws: every zone's render state over its own fill. */
+  readonly lights: LightSourceRef;
   /** Tap to order: panels become buttons, the light dims and the draft shows. */
   readonly drafting: boolean;
   /** The wall isn't showing this (offline, paused, someone else driving…): the light is drawn faded and greyed. */
@@ -50,8 +75,15 @@ interface StageCanvasProps {
   readonly level?: number;
   /** Mouse hover (and keyboard focus while drafting); null when it leaves. */
   onHover(id: number | null): void;
-  /** Click, tap, Enter or Space on a panel. */
+  /** Click, tap, Enter or Space on a panel (while choosing panels: Enter or Space only; presses go to `presses`). */
   onActivate(id: number): void;
+  /** Choosing panels for a zone, or null. */
+  readonly choosing?: ChoosingMarks | null;
+  readonly presses?: PanelPresses;
+  /** A touch drag paints panels; false while the drawing is zoomed, where a touch drag pans it instead. */
+  readonly paintTouch?: boolean;
+  /** Tap to order on a split wall: only these panels (the zone's) take numbers; null, every panel. */
+  readonly draftable?: ReadonlySet<number> | null;
 }
 
 /**
@@ -60,7 +92,7 @@ interface StageCanvasProps {
  * on top: dashed outlines for unnumbered panels, the drawn path, hover and drop highlights.
  */
 export function StageCanvas(props: StageCanvasProps) {
-  const { stage, stateRef, order, drafting, muted, draft, focusId, targetId, flash, accent, label } = props;
+  const { stage, lights: source, drafting, muted, draft, focusId, targetId, flash, accent, label } = props;
   const reduced = useReducedMotion();
   const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   const ids = useMemo(() => ({ bloom: `${uid}-bloom`, floor: `${uid}-floor`, sheen: `${uid}-sheen` }), [uid]);
@@ -128,7 +160,7 @@ export function StageCanvas(props: StageCanvasProps) {
     },
     [stage, panelIds, level],
   );
-  useLights(stateRef, order, onFrame, props.spans ?? null);
+  useLights(source, onFrame);
 
   const assigned = new Set(draft);
   const accentCss = cssRgb(accent);
@@ -136,6 +168,35 @@ export function StageCanvas(props: StageCanvasProps) {
   const target = targetId === null ? undefined : stage.byId.get(targetId);
   const focused = focusId === null || focusId === targetId ? undefined : stage.byId.get(focusId);
   const flashed = flash ? stage.byId.get(flash.id) : undefined;
+  const choosing = props.choosing ?? null;
+  const draftable = props.draftable ?? null;
+
+  // Choosing panels: a press, a drag across panels and the release, read from where the pointer is (a touch keeps its
+  // first target, so the panel under it is looked up each move).
+  const press = useRef<{ id: number; moved: boolean } | null>(null);
+  const presses = props.presses;
+  const paintTouch = props.paintTouch ?? true;
+  const onPointerDown = (e: PointerEvent<SVGSVGElement>) => {
+    if (!choosing || !presses || e.button !== 0) return;
+    const id = panelUnder(e.clientX, e.clientY);
+    if (id === null) return;
+    press.current = { id, moved: false };
+    presses.onPanelDown(id);
+  };
+  const onPointerMove = (e: PointerEvent<SVGSVGElement>) => {
+    const current = press.current;
+    if (!current || !presses || (e.pointerType !== "mouse" && !paintTouch)) return;
+    const id = panelUnder(e.clientX, e.clientY);
+    if (id === null || id === current.id) return;
+    press.current = { id, moved: true };
+    presses.onPanelDrag(id);
+  };
+  const onPointerEnd = (tap: boolean) => () => {
+    const current = press.current;
+    if (!current || !presses) return;
+    press.current = null;
+    presses.onPanelUp(tap && !current.moved);
+  };
 
   return (
     <svg
@@ -146,9 +207,21 @@ export function StageCanvas(props: StageCanvasProps) {
       style={{
         filter: muted ? "saturate(0.3)" : "saturate(1)",
         transition: "filter 250ms cubic-bezier(0.23, 1, 0.32, 1)",
+        touchAction: choosing && paintTouch ? "none" : undefined,
       }}
-      role={drafting ? "group" : "img"}
-      aria-label={drafting ? "Your wall: tap the panels in the order they should fill" : label}
+      role={drafting || choosing ? "group" : "img"}
+      aria-label={
+        drafting
+          ? "Your wall: tap the panels in the order they should fill"
+          : choosing
+            ? choosing.label
+            : label
+      }
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerEnd(true)}
+      onPointerCancel={onPointerEnd(false)}
+      onPointerLeave={onPointerEnd(false)}
     >
       <defs>
         <filter id={ids.bloom} x="-50%" y="-50%" width="200%" height="200%">
@@ -176,7 +249,7 @@ export function StageCanvas(props: StageCanvasProps) {
 
       {/* While drafting: numbered panels take the accent, the rest wait with a marching outline. */}
       {drafting &&
-        stage.panels.map((p) =>
+        stage.panels.filter((p) => !draftable || draftable.has(p.id)).map((p) =>
           assigned.has(p.id) ? (
             <motion.path
               key={`tint-${p.id}`}
@@ -200,6 +273,39 @@ export function StageCanvas(props: StageCanvasProps) {
             />
           ),
         )}
+
+      {/* Choosing panels: the zone's own in its tag colour, outlined, the rest dimmed. */}
+      {choosing && (
+        <g pointerEvents="none" aria-hidden>
+          {stage.panels.map((p) =>
+            choosing.panels.has(p.id) ? (
+              <motion.path
+                key={`own-${p.id}`}
+                d={p.path}
+                initial={false}
+                animate={{ fill: cssRgb(choosing.rgb), fillOpacity: CHOSEN_TINT }}
+                transition={{ duration: 0.18, ease: EASE_OUT }}
+              />
+            ) : (
+              <motion.path
+                key={`dim-${p.id}`}
+                d={p.path}
+                fill="var(--db-surface)"
+                initial={false}
+                animate={{ fillOpacity: OTHERS_DIM }}
+                transition={{ duration: 0.18, ease: EASE_OUT }}
+              />
+            ),
+          )}
+          <path
+            d={choosing.outline}
+            fill="none"
+            stroke={cssRgb(choosing.rgb)}
+            strokeWidth={2.5}
+            strokeLinecap="round"
+          />
+        </g>
+      )}
 
       {/* The path the fill will take, drawn a segment per tap. */}
       <AnimatePresence>
@@ -266,6 +372,8 @@ export function StageCanvas(props: StageCanvasProps) {
       <HitLayer
         stage={stage}
         drafting={drafting}
+        draftable={draftable}
+        choosing={choosing}
         assigned={draft}
         onHover={props.onHover}
         onActivate={props.onActivate}
@@ -365,16 +473,18 @@ const LightLayers = memo(function LightLayers({
 interface HitLayerProps {
   readonly stage: Stage;
   readonly drafting: boolean;
+  readonly draftable: ReadonlySet<number> | null;
+  readonly choosing: ChoosingMarks | null;
   readonly assigned: readonly number[];
   onHover(id: number | null): void;
   onActivate(id: number): void;
 }
 
 /**
- * Transparent outlines on top that take the pointer. While drafting they are buttons: focusable, labelled, and
- * Enter or Space numbers the panel.
+ * Transparent outlines on top that take the pointer. While drafting or choosing panels they are buttons: focusable,
+ * labelled, and Enter or Space numbers the panel (or brings it into the zone, or gives it back).
  */
-function HitLayer({ stage, drafting, assigned, onHover, onActivate }: HitLayerProps) {
+function HitLayer({ stage, drafting, draftable, choosing, assigned, onHover, onActivate }: HitLayerProps) {
   const onKey = (id: number) => (e: KeyboardEvent) => {
     if (e.key !== "Enter" && e.key !== " ") return;
     e.preventDefault();
@@ -384,6 +494,13 @@ function HitLayer({ stage, drafting, assigned, onHover, onActivate }: HitLayerPr
     <g>
       {stage.panels.map((p) => {
         const number = assigned.indexOf(p.id) + 1;
+        // Tap to order on a split wall numbers only the zone's panels: the rest stay plain.
+        const buttons = choosing !== null || (drafting && (!draftable || draftable.has(p.id)));
+        const label = choosing
+          ? `${panelName(p)}, ${choosing.panels.has(p.id) ? "in" : "not in"} ${choosing.name}'s zone`
+          : buttons
+            ? `${panelName(p)}${number ? `, number ${number}` : ", not numbered yet"}`
+            : undefined;
         return (
           <path
             key={p.id}
@@ -391,14 +508,16 @@ function HitLayer({ stage, drafting, assigned, onHover, onActivate }: HitLayerPr
             data-panel={p.id}
             fill="transparent"
             className="wall-hit cursor-pointer outline-none"
-            role={drafting ? "button" : undefined}
-            tabIndex={drafting ? 0 : undefined}
-            aria-hidden={drafting ? undefined : true}
-            aria-label={drafting ? `${panelName(p)}${number ? `, number ${number}` : ", not numbered yet"}` : undefined}
-            onClick={() => onActivate(p.id)}
-            onKeyDown={drafting ? onKey(p.id) : undefined}
-            onFocus={drafting ? () => onHover(p.id) : undefined}
-            onBlur={drafting ? () => onHover(null) : undefined}
+            role={buttons ? "button" : undefined}
+            tabIndex={buttons ? 0 : undefined}
+            aria-hidden={buttons ? undefined : true}
+            aria-label={label}
+            // While choosing, a press is read on pointer down and up (a drag paints); a click from the keyboard is
+            // Enter or Space, handled below.
+            onClick={choosing ? undefined : () => onActivate(p.id)}
+            onKeyDown={buttons ? onKey(p.id) : undefined}
+            onFocus={buttons ? () => onHover(p.id) : undefined}
+            onBlur={buttons ? () => onHover(null) : undefined}
             onPointerEnter={(e) => e.pointerType === "mouse" && onHover(p.id)}
             onPointerLeave={(e) => e.pointerType === "mouse" && onHover(null)}
           />

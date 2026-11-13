@@ -345,3 +345,91 @@ test("a throwing handler is logged and the stream carries on", async (t) => {
   assert.ok(logged.includes("An event handler failed"));
   assert.ok(logged.includes("The event stream's status handler failed"));
 });
+
+test("EventStream sends TouchEventsPort on every request only when asked", async (t) => {
+  const headers = [];
+  const server = createServer((req, res) => {
+    headers.push({ url: req.url, port: req.headers.toucheventsport ?? null, accept: req.headers.accept });
+    res.writeHead(200, { "Content-Type": "text/event-stream" });
+    res.flushHeaders();
+    if (headers.length % 2 === 1) res.end();
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => {
+    server.closeAllConnections();
+    return new Promise((resolve) => server.close(resolve));
+  });
+  const { port } = server.address();
+
+  const options = { host: "127.0.0.1", port, token: "tok", backoffMs: [5], onEvent: () => {} };
+  const asked = new EventStream({ ...options, ids: [4], touchEventsPort: 50123 });
+  t.after(() => asked.close());
+  await until(() => headers.length >= 2);
+  asked.close();
+  assert.deepEqual(headers.slice(0, 2), [
+    { url: "/api/v1/tok/events?id=4", port: "50123", accept: "text/event-stream" },
+    { url: "/api/v1/tok/events?id=4", port: "50123", accept: "text/event-stream" },
+  ]);
+
+  headers.length = 0;
+  let current = null;
+  const read = new EventStream({ ...options, touchEventsPort: () => current });
+  t.after(() => read.close());
+  await until(() => headers.length >= 1);
+  current = 50124;
+  await until(() => headers.length >= 2);
+  read.close();
+  assert.deepEqual(
+    headers.slice(0, 2).map((entry) => entry.port),
+    [null, "50124"],
+    "a function is read at each connect; null sends no header",
+  );
+
+  headers.length = 0;
+  const plain = new EventStream(options);
+  t.after(() => plain.close());
+  await until(() => headers.length >= 1);
+  plain.close();
+  assert.deepEqual(headers[0], { url: "/api/v1/tok/events?id=1,2,3,4", port: null, accept: "text/event-stream" });
+});
+
+test("EventStream sends no TouchEventsPort for 0, 65536, NaN, null or a function that throws", async (t) => {
+  const headers = [];
+  const server = createServer((req, res) => {
+    headers.push(req.headers.toucheventsport ?? null);
+    res.writeHead(200, { "Content-Type": "text/event-stream" });
+    res.flushHeaders();
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => {
+    server.closeAllConnections();
+    return new Promise((resolve) => server.close(resolve));
+  });
+  const { port } = server.address();
+  const logged = [];
+  const values = [
+    0,
+    65536,
+    Number.NaN,
+    () => null,
+    () => {
+      throw new Error("no port yet");
+    },
+    65535,
+  ];
+  for (const touchEventsPort of values) {
+    const before = headers.length;
+    const stream = new EventStream({
+      host: "127.0.0.1",
+      port,
+      token: "tok",
+      touchEventsPort,
+      onEvent: () => {},
+      log: (message, error) => logged.push([message, error]),
+    });
+    await until(() => headers.length > before);
+    stream.close();
+  }
+  assert.deepEqual(headers, [null, null, null, null, null, "65535"]);
+  assert.ok(logged.some(([message, error]) => /touch stream's port/.test(message) && error.message === "no port yet"));
+});

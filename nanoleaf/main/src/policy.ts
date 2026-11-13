@@ -13,7 +13,12 @@ export interface ControlInput {
   /** Light panels in the controller's layout (0 before it is known, or for a wall with no Shapes panels). */
   readonly panels: number;
   readonly enabled: boolean;
+  /** The scene `output` speaks for (scene.ts `outputScene`): the wall's, or with zones the one with the newest session. */
   readonly scene: Scene;
+  /** Some zone shows something (a non-off scene). Default: `scene` isn't off, as on a wall of one zone. */
+  readonly showing?: boolean;
+  /** The wall's scene key (scene.ts `wallSceneKey`), which a yield holds for. Default: `scene.key`. */
+  readonly sceneKey?: string;
   /** An interface preview's lease is running. */
   readonly previewActive: boolean;
   /** That preview is tap to order holding the wall: it takes the wall even from a yield. */
@@ -43,11 +48,11 @@ export const NO_PANELS_DETAIL = "The controller reports no Shapes panels";
 
 /** Something should show: a live or pinned scene, a controller's effect, an interface preview or a schedule alert. */
 function hasSomethingToShow(input: ControlInput): boolean {
-  return input.scene.kind !== "off" || input.previewActive || input.alertActive;
+  return (input.showing ?? input.scene.kind !== "off") || input.previewActive || input.alertActive;
 }
 
 function isYielded(input: ControlInput): boolean {
-  return input.yieldedKey !== null && input.yieldedKey === input.scene.key;
+  return input.yieldedKey !== null && input.yieldedKey === (input.sceneKey ?? input.scene.key);
 }
 
 /**

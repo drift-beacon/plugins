@@ -2,19 +2,30 @@ import { cn } from "@heroui/theme";
 import { Hash, Play, RotateCcw, RotateCw, Square } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { type ReactNode, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { cssRgb } from "../../../../shared/color.ts";
 import { placeLayout } from "../../../../shared/geometry.ts";
-import { fillSpans, fillsAsLine, resolveOrder } from "../../../../shared/order.ts";
+import { fillsAsLine, resolveOrder } from "../../../../shared/order.ts";
 import { orderSweepMs } from "../../../../shared/render.ts";
 import type { AutoOrder, OrderMode, PanelOrder, PlacedPanel, SweepFill } from "../../../../shared/types.ts";
-import { setDrafting, useDrawnLight } from "../../hooks/useDrawnLight.ts";
-import { useRenderState } from "../../hooks/useRenderState.ts";
+import { zoneTag } from "../../../../shared/zones.ts";
+import { setDrafting, useWallLight } from "../../hooks/useDrawnLight.ts";
+import { useWallZones } from "../../hooks/useZones.ts";
 import { useScene } from "../../hooks/useScene.ts";
-import { useWallPreview } from "../../hooks/useWallPreview.ts";
+import { useWallPreview, type WallRequest } from "../../hooks/useWallPreview.ts";
 import { accentRgb } from "../../lib/color.ts";
 import { nextSeed, panelName } from "../../lib/panels.ts";
 import { wallShowing } from "../../lib/showing.ts";
+import { zoneErrorText } from "../../lib/zone-actions.ts";
+import { createChoosing, type ChoosingState } from "../../lib/choosing.ts";
+import { escapeEndsChoosing, focusIsLost, OVERLAY, refocusAfterEnd } from "../../lib/choosingFocus.ts";
+import { createNumberingHold } from "../../lib/numbering.ts";
+import { orderTarget, saveEditorOrder, showsZones, zonedRequest } from "../../lib/zones.ts";
 import { useModel } from "../../model.ts";
 import { EASE_OUT } from "../../motion.ts";
+import { memberName } from "../zones/ZoneCards.tsx";
+import { ZoneEditingContext, type ZoneEditing } from "../zones/ZoneContext.ts";
+import { ZoneChips } from "../zones/ZoneChips.tsx";
+import { ZONE_WORDS } from "../zones/words.ts";
 import { swapIds } from "./badges.ts";
 import { Compass } from "./Compass.tsx";
 import { DraftPanel } from "./DraftPanel.tsx";
@@ -29,7 +40,7 @@ import {
 import { refusedText, stageLabel } from "./readout.ts";
 import { Scrubber } from "./Scrubber.tsx";
 import type { NumbersLevel } from "./StageBadges.tsx";
-import type { PanelFlash } from "./StageCanvas.tsx";
+import type { PanelFlash, PanelPresses } from "./StageCanvas.tsx";
 import type { ToastMessage } from "./StageToast.tsx";
 import { StageToolbar } from "./StageToolbar.tsx";
 import { STAGE_BG, toolClass, WallStage } from "./WallStage.tsx";
@@ -72,6 +83,8 @@ export interface WallParts {
   readonly scrubber: ReactNode;
   /** The fill order editor (the draft panel while tapping an order). */
   readonly editor: ReactNode;
+  /** More than one zone stands: the zone cards (components/zones) take the place of the Now card and the picker. */
+  readonly split: boolean;
 }
 
 /**
@@ -87,6 +100,7 @@ export function WallSection({
   tools = false,
   shown = true,
   sky = false,
+  onChoosing,
 }: {
   arrange?: (parts: WallParts) => ReactNode;
   cap?: number;
@@ -100,9 +114,11 @@ export function WallSection({
   shown?: boolean;
   /** The drawing on the night sky (the board): no surface around it, and no label over it. */
   sky?: boolean;
+  /** Choosing panels started (a zone's id) or ended (null): the phone brings the drawing's tab forward, then back. */
+  onChoosing?: (zoneId: string | null) => void;
 } = {}) {
   const model = useModel();
-  const { layout, controller, settings, order: saved, connection, actions } = model;
+  const { layout, controller, settings, order: savedWall, connection, actions } = model;
   const reduced = useReducedMotion();
 
   const placed = useMemo(
@@ -114,26 +130,58 @@ export function WallSection({
     () => (layout && cap !== undefined ? VIEW_TURNS.map((r) => placeLayout(layout, r)) : undefined),
     [layout, cap],
   );
-  const panels = placed?.panels ?? NO_PANELS;
-  const byId = useMemo(() => new Map(panels.map((p) => [p.id, p])), [panels]);
-  const resolved = useMemo(() => resolveOrder(saved, panels), [saved, panels]);
-  const n = resolved.length;
-  // A sweep filling as a line lights each panel by the stretch of the wall it covers, as main does; it has no
-  // sequence to number.
-  const spans = useMemo(() => fillSpans(saved, panels, resolved), [saved, panels, resolved]);
-  const line = fillsAsLine(saved);
+  const allPanels = placed?.panels ?? NO_PANELS;
 
   const scene = useScene();
   const preview = useWallPreview();
-  const { showLocal, showWall } = preview;
-  // The drawing's own previews, or a brightness slider's while one is dragged, at the wall's brightness.
-  const drawn = useDrawnLight(preview.local);
-  const stateRef = useRenderState(scene, drawn.preview);
+  const { showLocal, showWall: showWallRaw } = preview;
+  const [draft, setDraft] = useState<Draft | null>(null);
+  // The zone the fill order editor works on (the first by default), and the zone whose panels are being chosen.
+  const [selected, setSelected] = useState<string | null>(null);
+  const [choosingState, setChoosingState] = useState<ChoosingState>({ zoneId: null, painting: [] });
+  const choosing = choosingState.zoneId;
+  const painting = choosingState.painting;
+
+  const zones = useWallZones();
+  const split = showsZones(zones);
+  // The removed or never-chosen zone falls back to the first.
+  const editZone = zones.find((zone) => zone.id === selected) ?? zones[0];
+  const editZoneId = editZone?.id ?? null;
+  // Previews and tap to order apply to the zone the editor works on; on an unsplit wall, to the whole wall as before.
+  const target = split ? editZoneId : null;
+
+  // The drawing's own previews (on that zone), or a brightness slider's while one is dragged, at the wall's
+  // brightness; every zone lit by its own scene. Tap to order on a split wall holds the wall for its zone, the others
+  // dark.
+  const localZone = useMemo(() => ({ preview: preview.local, zoneId: target }), [preview.local, target]);
+  const drawn = useWallLight(placed, localZone, draft && target !== null ? target : null);
+  const { scenes, fills } = drawn;
+  /** The wall's preview, for the zone the editor works on (left out on an unsplit wall, as before zones). */
+  const showWall = useCallback(
+    (request: WallRequest | null, ms?: number) => showWallRaw(request && zonedRequest(request, target), ms),
+    [showWallRaw, target],
+  );
+
+  // The editor's panels and order: the selected zone's (every panel on an unsplit wall).
+  const saved = editZone?.order ?? savedWall;
+  const panels = useMemo(() => {
+    if (!split || !editZone) return allPanels;
+    const mine = new Set(editZone.panels);
+    return allPanels.filter((p) => mine.has(p.id));
+  }, [split, editZone, allPanels]);
+  const fill = fills.find((f) => f.id === editZoneId);
+  const resolved = useMemo(() => fill?.order ?? resolveOrder(saved, panels), [fill, saved, panels]);
+  const byId = useMemo(() => new Map(panels.map((p) => [p.id, p])), [panels]);
+  const n = resolved.length;
+  // A sweep filling as a line lights each panel by the stretch of the wall it covers, as main does; it has no
+  // sequence to number.
+  const line = fillsAsLine(saved);
+  const editScene = (split ? scenes.find((z) => z.id === editZoneId)?.scene : null) ?? scene;
+
   const accent = useMemo(() => accentRgb(scene.cssColor), [scene.cssColor]);
   const canWall = connection?.status === "connected" && settings.enabled;
   const canTouch = connection?.status === "connected" && connection.events;
 
-  const [draft, setDraft] = useState<Draft | null>(null);
   const [focus, setFocus] = useState<number | null>(null);
   const [flash, setFlash] = useState<PanelFlash | null>(null);
   const [numbersOn, setNumbersOn] = useState(true);
@@ -218,14 +266,16 @@ export function WallSection({
   const commit = useCallback(
     (next: PanelOrder, { sweep = true }: { sweep?: boolean } = {}) => {
       stopPreviews();
-      void actions.saveOrder(next).catch(refused("the order"));
+      // An unsplit wall writes the wall's order as before zones; a zone of a split wall, its own.
+      const to = editZoneId === null ? null : orderTarget(model.zones, zones, editZoneId);
+      void saveEditorOrder(actions, to, next).catch(refused("the order"));
       if (!sweep) return;
       showLocal({ mode: "order", rgb: null }, orderSweepMs(n) - SWEEP_TAIL_MS);
       setEmphasised(true);
       window.clearTimeout(timers.current.emphasis);
       timers.current.emphasis = window.setTimeout(() => setEmphasised(false), EMPHASIS_MS);
     },
-    [actions, n, refused, showLocal, stopPreviews],
+    [actions, n, refused, showLocal, stopPreviews, editZoneId, model.zones, zones],
   );
 
   const custom = useCallback((ids: readonly number[]): PanelOrder => customOrder(saved, ids), [saved]);
@@ -270,6 +320,7 @@ export function WallSection({
       .saveSettings({ viewRotation: (settings.viewRotation + step + 360) % 360 })
       .catch(refused("the rotation"));
   const swap = (a: number, b: number) => {
+    if (chooser.state.zoneId !== null) return;
     const ka = resolved.indexOf(a);
     const kb = resolved.indexOf(b);
     if (ka < 0 || kb < 0) return;
@@ -319,17 +370,22 @@ export function WallSection({
     showLocal({ ...preview, rgb: null });
     showWall(canWall ? preview : null);
   }, [draft, canWall, showLocal, showWall]);
-  // The brightness sliders leave the wall to it meanwhile.
   const drafting = draft !== null;
-  useEffect(() => setDrafting(drafting), [drafting]);
+  // Choosing panels for a zone holds the wall too (its tag colours): presses on the drawing and touches on the wall
+  // move panels, not gestures. The brightness sliders leave the wall to either meanwhile.
+  const numberingNow = drafting || choosing !== null;
+  useEffect(() => setDrafting(numberingNow), [numberingNow]);
   useEffect(() => () => setDrafting(false), []);
-  // Main hears it too, so gestures on the wall leave the workspace alone meanwhile, whether or not it drives the wall.
-  const { numbering } = model.actions;
-  useEffect(() => {
-    if (!drafting) return;
-    void numbering(true);
-    return () => void numbering(false);
-  }, [drafting, numbering]);
+  // Main hears it too (`numbering`, held by tap to order and by choosing panels, said again on a resync since main
+  // may have lost it), so gestures on the wall leave the workspace alone meanwhile, whether or not it drives the wall.
+  const numberingSend = useRef(model.actions.numbering);
+  useLayoutEffect(() => {
+    numberingSend.current = model.actions.numbering;
+  });
+  const [hold] = useState(() => createNumberingHold((on) => void numberingSend.current(on)));
+  useEffect(() => hold.set("draft", drafting), [hold, drafting]);
+  useEffect(() => () => hold.release(), [hold]);
+  useEffect(() => model.onResync(hold.resend), [model.onResync, hold]);
 
   const finishDraft = useCallback(
     (ids: readonly number[]) => {
@@ -359,6 +415,8 @@ export function WallSection({
   }, [draft]);
 
   const startDraft = (keyboard: boolean) => {
+    if (n === 0) return;
+    chooser.end();
     stopPreviews();
     setRefocus(false);
     focusDraft.current = keyboard;
@@ -397,9 +455,115 @@ export function WallSection({
     announce(`Removed number ${current.ids.length}`);
   };
 
+  /* ---- Choosing panels for a zone ---- */
+
+  const onChoosingRef = useRef(onChoosing);
+  const pulseRef = useRef(pulse);
+  useLayoutEffect(() => {
+    onChoosingRef.current = onChoosing;
+    pulseRef.current = pulse;
+  });
+  const zoneRefused = useCallback((error: unknown) => setToast({ id: Date.now(), text: zoneErrorText(error) }), []);
+  // Where focus goes once choosing ends from the drawing, or once it starts and the button pressed is gone.
+  const refocusTo = useRef<"start" | { readonly end: string } | null>(null);
+  const lastChoosing = useRef<ChoosingState>(choosingState);
+  const [chooser] = useState(() =>
+    createChoosing({
+      showWall: (request) => showWallRaw(request),
+      hold: (on) => hold.set("choosing", on),
+      changed: (next) => {
+        const old = lastChoosing.current;
+        lastChoosing.current = next;
+        if (old.zoneId !== next.zoneId) {
+          refocusTo.current = next.zoneId === null ? (old.zoneId ? { end: old.zoneId } : null) : "start";
+          onChoosingRef.current?.(next.zoneId);
+        }
+        setChoosingState(next);
+      },
+      movePanels: (zoneId, ids) => actions.movePanels(zoneId, ids),
+      refused: zoneRefused,
+      pulse: (id) => pulseRef.current(id),
+      setTimeout: (fn, ms) => window.setTimeout(fn, ms),
+      clearTimeout: (handle) => window.clearTimeout(handle as number),
+    }),
+  );
+  const chosen = choosing === null ? null : (zones.find((zone) => zone.id === choosing) ?? null);
+  useLayoutEffect(() => chooser.setZones(zones), [chooser, zones]);
+  useLayoutEffect(() => chooser.setCanWall(canWall), [chooser, canWall]);
+  // Leaving the drawing's tab or closing ends it, and the wall goes back to what shows.
+  useEffect(() => chooser.setShown(shown), [chooser, shown]);
+  useEffect(() => () => chooser.end(), [chooser]);
+
+  const startChoosing = (id: string) => {
+    cancelDraft();
+    stopPreviews();
+    setSelected(id);
+    setFocus(null);
+    chooser.start(id);
+    // Narrow, the drawing sits above the cards: bring it into view to choose on.
+    stageRef.current?.scrollIntoView({ block: "nearest", behavior: reduced ? "auto" : "smooth" });
+  };
+  const endChoosing = useCallback(() => chooser.end(), [chooser]);
+  const choose = (id: string | null) => (id === null ? endChoosing() : startChoosing(id));
+  // Said once the zone is there: one just added may reach the model a moment after choosing starts.
+  const chosenAnnounce = chosen ? ZONE_WORDS.choosingFor(memberName(model, chosen.member)) : null;
+  useEffect(() => {
+    if (chosenAnnounce) announce(chosenAnnounce);
+  }, [chosenAnnounce, announce]);
+  // Escape ends it, unless an open popover or menu takes it first. From a panel or the banner, focus then moves on
+  // (the panels stop being buttons, the banner goes).
+  const escapedFromDrawing = useRef(false);
+  useEffect(() => {
+    if (choosing === null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      const target = e.target instanceof Element ? e.target : null;
+      if (!escapeEndsChoosing(e.defaultPrevented, target?.closest(OVERLAY) != null)) return;
+      escapedFromDrawing.current = !!target && (stageRef.current?.contains(target) ?? false);
+      endChoosing();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [choosing, endChoosing]);
+  // Focus is never dropped to the page, and never taken from a control the person is on: when choosing starts, the
+  // banner's Done takes it if the button pressed has gone (a chip in "Whose zone?", on its way out); when it ends,
+  // that zone's Choose panels does, else Split the wall or the first card, but only if focus was lost (the banner's
+  // Done went) or the person pressed Escape on the drawing (lib/choosingFocus.ts).
+  useEffect(() => {
+    const want = refocusTo.current;
+    if (want === null || (want === "start" && !chosen)) return;
+    refocusTo.current = null;
+    const escaped = escapedFromDrawing.current;
+    escapedFromDrawing.current = false;
+    const lost = focusIsLost(document.activeElement, document.body);
+    const focusFirst = (selectors: readonly string[]) => {
+      for (const selector of selectors) {
+        const found = document.querySelector<HTMLElement>(selector);
+        if (found) return void found.focus({ preventScroll: true });
+      }
+    };
+    if (want === "start") {
+      if (lost) focusFirst(["[data-choosing-done]"]);
+      return;
+    }
+    if (refocusAfterEnd(lost, escaped)) {
+      focusFirst([`[data-choose-zone="${want.end}"]`, "[data-split-wall]", "[data-zone-card-heading]"]);
+    }
+  });
+
+  const presses: PanelPresses = {
+    onPanelDown: (id) => chooser.down(id),
+    onPanelDrag: (id) => chooser.drag(id),
+    onPanelUp: (tap) => chooser.up(tap),
+  };
+
+  const editing: ZoneEditing = { zones, scenes, split, choosing, choose };
+
   /* ---- The drawing ---- */
 
   const activate = (id: number) => {
+    // While choosing, only Enter or Space reach here (presses go to `presses`).
+    if (chooser.state.zoneId !== null) return chooser.tap(id);
     if (draftRef.current) return tapDraft(id);
     pulse(id);
     identify(id);
@@ -409,6 +573,7 @@ export function WallSection({
   const onTouched = useRef<(id: number) => void>(() => undefined);
   useLayoutEffect(() => {
     onTouched.current = (id) => {
+      if (chooser.state.zoneId !== null) return chooser.touch(id);
       if (!byId.has(id)) return;
       if (draftRef.current) tapDraft(id);
       else pulse(id);
@@ -417,6 +582,7 @@ export function WallSection({
   const { onTouch } = model;
   useEffect(() => {
     if (!canTouch) return;
+    // While choosing panels, a touch on the wall brings that panel in (a tap or double tap, as tap to order takes).
     return onTouch((panelId, gesture) => {
       if (gesture === "tap" || gesture === "double-tap") onTouched.current(panelId);
     });
@@ -433,7 +599,7 @@ export function WallSection({
   }, [notShown, muteReady]);
   const muted = notShown && muteReady;
 
-  if (!placed || !controller || panels.length === 0) return null;
+  if (!placed || !controller || allPanels.length === 0) return null;
 
   const numbers: NumbersLevel = draft
     ? "full"
@@ -444,11 +610,54 @@ export function WallSection({
         : "dim";
   const activity = scene.activityId ? model.activities.find((a) => a.id === scene.activityId) : undefined;
   const label = stageLabel({
-    panels: n,
+    panels: allPanels.length,
     activity: activity?.name ?? null,
     fraction: scene.progress?.fraction ?? null,
     showing,
   });
+  // Choosing panels: the zone's own, with a drag in progress already counted.
+  const chosenName = chosen ? memberName(model, chosen.member) : "";
+  const chosenPanels = chosen ? (painting.length > 0 ? [...new Set([...chosen.panels, ...painting])] : chosen.panels) : [];
+  const giveBackTo = chosen ? zones.find((zone) => zone.id !== chosen.id) : undefined;
+  const tags = zones.map((zone) => ({
+    id: zone.id,
+    name: memberName(model, zone.member),
+    rgb: zoneTag(zone.position),
+    panels: zone.panels,
+  }));
+  const banner = chosen ? (
+    <div className="space-y-1.5 px-3 pt-2 pb-1 text-center">
+      <div
+        className="mx-auto flex w-fit max-w-full items-center gap-3 rounded-2xl bg-content1/90 py-1.5 pr-1.5 pl-3 ring-1 ring-default-200 backdrop-blur"
+        style={{ boxShadow: `inset 0 0 0 1.5px ${cssRgb(zoneTag(chosen.position))}` }}
+      >
+        <span
+          aria-hidden
+          className="h-2.5 w-2.5 shrink-0 rounded-full"
+          style={{ background: cssRgb(zoneTag(chosen.position)) }}
+        />
+        {/* Wraps rather than cut the name off on a phone. */}
+        <span className="min-w-0 text-left font-medium text-foreground text-sm leading-tight">
+          {ZONE_WORDS.choosingFor(chosenName)}
+        </span>
+        <span className="shrink-0 text-default-500 text-xs tabular-nums">
+          {ZONE_WORDS.panels(chosenPanels.length)}
+        </span>
+        <button
+          type="button"
+          data-choosing-done
+          onClick={endChoosing}
+          className="inline-flex h-8 shrink-0 items-center rounded-xl bg-foreground px-3.5 font-medium text-background text-xs transition-transform duration-150 ease-out active:scale-[0.97]"
+        >
+          {ZONE_WORDS.done}
+        </button>
+      </div>
+      {giveBackTo && (
+        <p className="text-default-500 text-xs">{ZONE_WORDS.chooseHint(memberName(model, giveBackTo.member))}</p>
+      )}
+    </div>
+  ) : null;
+
   const swapMotion = reduced
     ? { initial: { opacity: 0 }, animate: { opacity: 1 }, exit: { opacity: 0 } }
     : {
@@ -464,13 +673,16 @@ export function WallSection({
 
   const scrubber = (
     // While drafting the drawing is for tapping: the goal preview steps back.
-    <div inert={draft !== null} className={cn("transition-opacity duration-200", draft && "opacity-35")}>
+    <div
+      inert={draft !== null || chosen !== null}
+      className={cn("transition-opacity duration-200", (draft || chosen) && "opacity-35")}
+    >
       <Scrubber
         // A line's goal is a distance, not a count: one track, not a segment per panel.
         n={line ? 1 : n}
         value={goal}
         sweep={playing ? { id: plays, n } : null}
-        now={scene.progress ? scene.progress.fraction : null}
+        now={editScene.progress ? editScene.progress.fraction : null}
         accent={accent}
         onChange={scrub}
         onEnd={stopPreviews}
@@ -488,9 +700,7 @@ export function WallSection({
         placed={placed}
         turns={turns}
         rotation={settings.viewRotation}
-        stateRef={stateRef}
-        order={resolved}
-        spans={spans}
+        lights={drawn.source}
         numberOrder={resolved}
         drafting={draft !== null}
         draft={draft?.ids ?? []}
@@ -509,19 +719,27 @@ export function WallSection({
         onActivate={activate}
         onSwap={swap}
         sky={sky}
+        choosing={chosen ? { name: chosenName, rgb: zoneTag(chosen.position), panels: chosenPanels } : null}
+        presses={presses}
+        tags={split && !chosen && !draft ? tags : null}
+        draftable={split && draft ? resolved : null}
+        banner={banner}
         header={
           toolbar ? (
-            <StageToolbar
-              panels={n}
-              name={controller.name}
-              rotation={settings.viewRotation}
-              numbers={line ? null : numbersOn}
-              playing={playing}
-              onPlay={togglePlay}
-              onTurn={turn}
-              onNumbers={setNumbersOn}
-              sky={sky}
-            />
+            // Choosing panels: Play and the rest step back with the editor, so nothing ends the zones preview.
+            <div inert={chosen !== null} className={cn("transition-opacity duration-200", chosen && "opacity-50")}>
+              <StageToolbar
+                panels={allPanels.length}
+                name={controller.name}
+                rotation={settings.viewRotation}
+                numbers={line ? null : numbersOn}
+                playing={playing}
+                onPlay={togglePlay}
+                onTurn={turn}
+                onNumbers={setNumbersOn}
+                sky={sky}
+              />
+            </div>
           ) : null
         }
         // With `tools`, the goal preview stays in the drawing's card, under the tool row.
@@ -529,7 +747,7 @@ export function WallSection({
         cap={cap}
         tools={
           // While numbering your own order the drawing is for tapping: only zoom stays.
-          tools && !draft ? (
+          tools && !draft && !chosen ? (
             <>
               <button
                 type="button"
@@ -596,7 +814,14 @@ export function WallSection({
   ) : null;
 
   const editor = (
-    <div className="@container rounded-3xl bg-content1 @sm:p-5 p-4 ring-1 ring-default-100">
+    // While choosing panels the drawing is for that: the editor steps back, as the goal preview does.
+    <div
+      inert={chosen !== null}
+      className={cn(
+        "@container rounded-3xl bg-content1 @sm:p-5 p-4 ring-1 ring-default-100 transition-opacity duration-200",
+        chosen && "opacity-50",
+      )}
+    >
       <AnimatePresence mode="wait" initial={false}>
         {draft ? (
           <motion.div key="draft" {...swapMotion} transition={{ duration: 0.2, ease: EASE_OUT }}>
@@ -604,6 +829,20 @@ export function WallSection({
           </motion.div>
         ) : (
           <motion.div key="editor" {...swapMotion} transition={{ duration: 0.2, ease: EASE_OUT }}>
+            {/* A split wall's fill order is per zone: these choose which (the first by default). */}
+            {split && (
+              <ZoneChips
+                zones={zones}
+                value={editZoneId}
+                name={(zone) => memberName(model, zone.member)}
+                label={ZONE_WORDS.orderTitle}
+                onChange={(id) => {
+                  stopPreviews();
+                  setSelected(id);
+                }}
+                className="mb-4"
+              />
+            )}
             <Compass
               order={saved}
               refocus={refocus}
@@ -623,33 +862,41 @@ export function WallSection({
 
   if (arrange) {
     return (
-      <section ref={sectionRef} aria-label="Your wall and its fill order">
-        {arrange({
-          stage,
-          scrubber: (
-            <div className="wall-stage rounded-3xl text-foreground ring-1 ring-default-100" style={{ background: STAGE_BG }}>
-              {scrubber}
-            </div>
-          ),
-          editor,
-        })}
-        <div aria-live="polite" className="sr-only">
-          {announcement}
-        </div>
-      </section>
+      <ZoneEditingContext.Provider value={editing}>
+        <section ref={sectionRef} aria-label="Your wall and its fill order">
+          {arrange({
+            stage,
+            scrubber: (
+              <div
+                className="wall-stage rounded-3xl text-foreground ring-1 ring-default-100"
+                style={{ background: STAGE_BG }}
+              >
+                {scrubber}
+              </div>
+            ),
+            editor,
+            split,
+          })}
+          <div aria-live="polite" className="sr-only">
+            {announcement}
+          </div>
+        </section>
+      </ZoneEditingContext.Provider>
     );
   }
 
   return (
-    <section ref={sectionRef} aria-label="Your wall and its fill order" className="@container/wall">
-      {/* Beside the drawing from 672 px (a ~1070 px control-room frame), so the fill order controls sit beside it. */}
-      <div className="grid @2xl/wall:grid-cols-[minmax(0,1fr)_300px] @2xl/wall:items-start gap-4">
-        {stage}
-        {editor}
-      </div>
-      <div aria-live="polite" className="sr-only">
-        {announcement}
-      </div>
-    </section>
+    <ZoneEditingContext.Provider value={editing}>
+      <section ref={sectionRef} aria-label="Your wall and its fill order" className="@container/wall">
+        {/* Beside the drawing from 672 px (a ~1070 px control-room frame), so the fill order controls sit beside it. */}
+        <div className="grid @2xl/wall:grid-cols-[minmax(0,1fr)_300px] @2xl/wall:items-start gap-4">
+          {stage}
+          {editor}
+        </div>
+        <div aria-live="polite" className="sr-only">
+          {announcement}
+        </div>
+      </section>
+    </ZoneEditingContext.Provider>
   );
 }

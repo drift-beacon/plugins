@@ -88,3 +88,18 @@ test("main re-decides the scene when who the wall follows, the settings, the ord
     ["update"],
   ]);
 });
+
+test("main hands a schedule's members to the Director, which picks the zones they speak to", () => {
+  const calls = [];
+  const handlers = {};
+  const ctx = {
+    onDataChange() {},
+    schedules: { onTriggered: (fn) => void (handlers.schedule = fn) },
+    storage: { onChange() {} },
+  };
+  const director = { alert: (...args) => calls.push(args), update() {} };
+  listen(ctx, director, () => ["sam", "alex"], { controller() {}, settings() {} });
+  handlers.schedule({ activityId: "a1", members: ["alex"] });
+  handlers.schedule({ activityId: "a2", members: ["owner"] });
+  assert.deepEqual(calls, [["a1", ["alex"]]]);
+});

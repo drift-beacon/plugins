@@ -266,15 +266,20 @@ function point(activityId: string, at: number, members: readonly string[] = [ME]
   };
 }
 
-/** A live span of `activityId` that `ME` is in, started `minutes` ago. */
-export function liveSpan(activityId: string, now: number, minutes: number): SessionLike {
+/** A live span of `activityId` that `members` (`ME` by default) are in, started `minutes` ago. */
+export function liveSpan(
+  activityId: string,
+  now: number,
+  minutes: number,
+  members: readonly string[] = [ME],
+): SessionLike {
   return {
     id: nextSessionId(),
     activityId,
     type: "span",
     status: "live",
-    memberIds: [ME],
-    currentMemberIds: [ME],
+    memberIds: members,
+    currentMemberIds: members,
     startedAt: new Date(now - minutes * MIN),
     endedAt: null,
   };

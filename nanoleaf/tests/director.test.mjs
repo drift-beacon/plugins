@@ -19,6 +19,7 @@ import {
 } from "../shared/render.ts";
 import { OFF_SCENE } from "../shared/scene.ts";
 import { DEFAULT_ORDER, DEFAULT_SETTINGS } from "../shared/storage.ts";
+import { ZONE_TAG_LEVEL, zoneTag } from "../shared/zones.ts";
 import { acquire, clearYielded, createOwner, holder, markYielded, release, yieldedMark } from "../main/src/claims.ts";
 import { DEFAULT_TIMINGS, Director, STATIC_NOTE } from "../main/src/director.ts";
 import { captureHandback, handbackPlan, isReservedEffect, runHandback, stillOurs } from "../main/src/handback.ts";
@@ -2158,4 +2159,363 @@ test("DEFAULT_TIMINGS match DESIGN.md", () => {
   assert.equal(DEFAULT_TIMINGS.overrideMs, 3000);
   assert.equal(DEFAULT_TIMINGS.brightnessThrottleMs, 150);
   assert.equal(DEFAULT_TIMINGS.stopTimeoutMs, 3000);
+});
+
+/* ---- Zones: a split wall ---- */
+
+const OTHER = "u2";
+const TWO = [
+  { id: USER, name: "U", role: "OWNER" },
+  { id: OTHER, name: "O", role: "MEMBER" },
+];
+const RED = "#ef4444";
+const GREEN = "#10b981";
+const theirSession = (id, activityId, startedAt) => ({
+  ...liveSession(id, activityId, startedAt),
+  memberIds: [OTHER],
+  currentMemberIds: [OTHER],
+});
+/** theduck's light panels: the first three are the owner's zone, the other four the second member's. */
+const DUCK = [15767, 32797, 34671, 36406, 39807, 42632, 49632];
+const MINE = DUCK.slice(0, 3);
+const THEIRS = DUCK.slice(3);
+const SPLIT = [
+  { id: "wall", member: USER, panels: MINE },
+  { id: "z2", member: OTHER, panels: THEIRS },
+];
+/** The channel a colour is brightest in: 0 red, 1 green, 2 blue. */
+const top = (rgb) => rgb.indexOf(Math.max(...rgb));
+const lightsOf = (env) => new Map(lastFrame(env).lights);
+const isRed = (rgb) => rgb[0] > rgb[1] && rgb[0] > rgb[2];
+const SETTLED = FADE_MS + STAGGER_MAX_MS + 200;
+
+function split(options = {}) {
+  return setup({
+    members: TWO,
+    activities: [activity("a1", PURPLE), activity("a2", GREEN), activity("a3", RED)],
+    ...options,
+    storage: { zones: SPLIT, ...options.storage },
+  });
+}
+
+test("a split wall: each member's session lights only their zone, in its colour; output speaks for the newest", async () => {
+  const env = split({ sessions: [liveSession("s1", "a1", T0 - 120_000), theirSession("s2", "a2", T0 - 60_000)] });
+  await connect(env);
+  await env.clock.advance(SETTLED);
+  assert.deepEqual(
+    env.director.zones.map((zone) => [zone.id, zone.following, zone.panels]),
+    [
+      ["wall", [USER], MINE],
+      ["z2", [OTHER], THEIRS],
+    ],
+  );
+  assert.deepEqual(new Set(env.director.order), new Set(DUCK), "the wall's order covers every panel once");
+  assert.deepEqual(new Set(env.director.order.slice(0, 3)), new Set(MINE), "the first zone's order first");
+  const lights = lightsOf(env);
+  for (const id of MINE) assert.equal(top(lights.get(id)), 2, `purple in my zone: ${lights.get(id)}`);
+  for (const id of THEIRS) assert.equal(top(lights.get(id)), 1, `green in theirs: ${lights.get(id)}`);
+  assert.equal(env.director.output.mode, "live");
+  assert.equal(env.director.output.activityId, "a2", "their session is the newer");
+  assert.equal(env.device.state.brightness, DEFAULT_SETTINGS.maxBrightness);
+  // Their session ends: their zone shows nothing (no pin), mine goes on, and output speaks for mine.
+  endLive(env, "s2");
+  await env.clock.advance(SETTLED);
+  for (const id of THEIRS) assert.deepEqual(lightsOf(env).get(id), [0, 0, 0]);
+  for (const id of MINE) assert.equal(top(lightsOf(env).get(id)), 2);
+  assert.equal(env.director.output.activityId, "a1");
+  assert.equal(env.director.inControl, true);
+  await env.director.stop();
+});
+
+test("a split wall yields for every zone's scene together, and a change in any zone ends the yield", async () => {
+  const env = split({ sessions: [liveSession("s1", "a1", T0)] });
+  await connect(env);
+  await env.clock.advance(DEFAULT_TIMINGS.ownWriteMs + 100);
+  env.director.onDeviceEvent({ effect: "Flames" });
+  assert.equal(env.director.inControl, false);
+  assert.equal(env.director.yieldedKey, `live:s1|${OFF_SCENE.key}`);
+  assert.equal(env.director.output.mode, "yielded");
+  // Only the other zone changes: the wall comes back.
+  env.data.sessions = [theirSession("s2", "a2", T0 + 5000), ...env.data.sessions];
+  env.director.update();
+  await env.clock.advance(0);
+  assert.equal(env.director.yieldedKey, null);
+  assert.equal(env.director.inControl, true);
+  await env.director.stop();
+});
+
+test("previews on a split wall: a fill in the named zone, identify everywhere, tap to order alone, the zone tags", async () => {
+  const env = split({ sessions: [liveSession("s1", "a1", T0), theirSession("s2", "a2", T0)] });
+  await connect(env);
+  await env.clock.advance(SETTLED);
+  // A fill in red for their zone: theirs red, mine still purple.
+  env.director.preview({ mode: "fill", fraction: 1, activityId: "a3", zoneId: "z2", ttlMs: 10_000 });
+  await env.clock.advance(500);
+  for (const id of THEIRS) assert.equal(top(lightsOf(env).get(id)), 0, `red: ${lightsOf(env).get(id)}`);
+  for (const id of MINE) assert.equal(top(lightsOf(env).get(id)), 2, `still purple: ${lightsOf(env).get(id)}`);
+  assert.equal(env.director.output.mode, "preview");
+  // A zone that doesn't stand: taken as none, so the fill ends.
+  assert.deepEqual(env.director.preview({ mode: "fill", fraction: 1, activityId: "a3", zoneId: "gone" }), {
+    shown: false,
+  });
+  assert.equal(env.director.output.mode, "live");
+  // Without a zone: the first zone.
+  env.director.preview({ mode: "fill", fraction: 1, activityId: "a3", ttlMs: 10_000 });
+  await env.clock.advance(500);
+  for (const id of MINE) assert.equal(top(lightsOf(env).get(id)), 0, `red in the first zone: ${lightsOf(env).get(id)}`);
+  for (const id of THEIRS) assert.equal(top(lightsOf(env).get(id)), 1, `green again: ${lightsOf(env).get(id)}`);
+  // Identify names panels, wherever they are.
+  env.director.preview({ mode: "identify", panelIds: [MINE[0], THEIRS[0]], activityId: "a3", ttlMs: 10_000 });
+  await env.clock.advance(700);
+  assert.equal(top(lightsOf(env).get(MINE[0])), 0);
+  assert.equal(top(lightsOf(env).get(THEIRS[0])), 0);
+  // Tap to order for their zone: their panels number, mine are dark, at the draft's brightness.
+  env.director.preview({ mode: "draft", panelIds: [THEIRS[0]], zoneId: "z2", ttlMs: 10_000 });
+  await env.clock.advance(500);
+  assert.equal(env.director.drafting, true);
+  assert.equal(env.device.state.brightness, DRAFT_BRIGHTNESS);
+  assert.deepEqual(lightsOf(env).get(THEIRS[0]), deviceRgb({ rgb: DRAFT_YELLOW, level: DRAFT_MARKED }));
+  assert.deepEqual(lightsOf(env).get(THEIRS[1]), deviceRgb({ rgb: WARM_WHITE, level: DRAFT_WAITING }));
+  for (const id of MINE) assert.deepEqual(lightsOf(env).get(id), [0, 0, 0]);
+  // The zone-editing preview: every zone in its tag colour, at Session brightness, and it is no draft.
+  env.director.preview({ mode: "zones", ttlMs: 10_000 });
+  await env.clock.advance(300);
+  assert.equal(env.director.drafting, false);
+  assert.equal(env.director.editingZones, true);
+  assert.equal(env.device.state.brightness, DEFAULT_SETTINGS.maxBrightness);
+  for (const id of MINE) assert.deepEqual(lightsOf(env).get(id), deviceRgb({ rgb: zoneTag(0), level: ZONE_TAG_LEVEL }));
+  for (const id of THEIRS) assert.deepEqual(lightsOf(env).get(id), deviceRgb({ rgb: zoneTag(1), level: ZONE_TAG_LEVEL }));
+  env.director.preview({ mode: "none" });
+  await env.clock.advance(SETTLED);
+  assert.equal(env.director.editingZones, false);
+  for (const id of MINE) assert.equal(top(lightsOf(env).get(id)), 2);
+  for (const id of THEIRS) assert.equal(top(lightsOf(env).get(id)), 1);
+  await env.director.stop();
+});
+
+test("the zone-editing preview takes an idle wall, held by its copy like any preview", async () => {
+  const env = split();
+  await connect(env);
+  assert.equal(env.director.inControl, false);
+  assert.deepEqual(env.director.preview({ mode: "zones", ttlMs: 10_000 }, "copy-1"), { shown: true });
+  await env.clock.advance(0);
+  assert.equal(env.director.inControl, true);
+  env.director.endPreviewsExcept(new Set(["copy-2"]));
+  assert.equal(env.director.editingZones, false);
+  await env.clock.advance(DEFAULT_TIMINGS.graceMs + 200);
+  assert.equal(env.director.inControl, false);
+  await env.director.stop();
+});
+
+test("a pin beside a session: the wall at Session brightness, the pin's zone scaled to Pinned brightness", async () => {
+  const settings = { maxBrightness: 80, pinnedBrightness: 20, pinnedStyle: "glow" };
+  const pinned = [activity("a1", PURPLE), activity("a2", GREEN, { pinned: true })];
+  // The same pin on an unsplit wall, at its own brightness: the level its panels are drawn at.
+  const alone = setup({ activities: pinned, settings });
+  await connect(alone);
+  await alone.clock.advance(SETTLED);
+  assert.equal(alone.device.state.brightness, 20);
+  const green = toLedRgb(parseColor(GREEN));
+  const own = levelOf(new Map(lastFrame(alone).lights).get(THEIRS[0]), green);
+  await alone.director.stop();
+
+  const env = split({ activities: pinned, settings, sessions: [liveSession("s1", "a1", T0)] });
+  await connect(env);
+  await env.clock.advance(SETTLED);
+  assert.equal(env.director.scenes[1].scene.kind, "pinned", "their zone shows the workspace's pin");
+  assert.equal(env.device.state.brightness, 80);
+  for (const id of THEIRS) {
+    const level = levelOf(lightsOf(env).get(id), green);
+    assert.ok(Math.abs(level - (own * 20) / 80) < 0.01, `scaled by 20/80: ${level} vs ${own}`);
+  }
+  // My session ends: both zones show the pin, at its own brightness, unscaled.
+  endLive(env, "s1");
+  await env.clock.advance(SETTLED + 500);
+  assert.equal(env.device.state.brightness, 20);
+  for (const id of DUCK) assert.ok(Math.abs(levelOf(lightsOf(env).get(id), green) - own) < 0.01);
+  await env.director.stop();
+});
+
+test("a schedule alert plays only in the zones whose member it speaks to", async () => {
+  const sessions = [liveSession("s1", "a1", T0), theirSession("s2", "a2", T0)];
+  const env = split({ sessions });
+  const twin = split({ sessions });
+  await connect(env);
+  await connect(twin);
+  await env.clock.advance(SETTLED);
+  await twin.clock.advance(SETTLED);
+  assert.deepEqual(env.director.alert("a3", ["nobody"]), { shown: false }, "it speaks to no zone");
+  assert.deepEqual(env.director.alert("a3", [OTHER]), { shown: true });
+  await env.clock.advance(ALERT_BEAT_MS / 2);
+  await twin.clock.advance(ALERT_BEAT_MS / 2);
+  const lights = lightsOf(env);
+  const without = lightsOf(twin);
+  for (const id of THEIRS) assert.equal(top(lights.get(id)), 0, `red at the peak in their zone: ${lights.get(id)}`);
+  for (const id of MINE) assert.deepEqual(lights.get(id), without.get(id), "my zone as it would be without it");
+  await env.director.stop();
+  await twin.director.stop();
+});
+
+test("a schedule alert waits for an idle split wall and plays only in its zone once taken", async () => {
+  const env = split({ sessions: [] });
+  await connect(env);
+  assert.equal(env.director.inControl, false);
+  assert.deepEqual(env.director.alert("a3", [USER]), { shown: true });
+  await env.clock.advance(ALERT_BEAT_MS / 2);
+  assert.equal(env.director.inControl, true);
+  const lights = lightsOf(env);
+  for (const id of MINE) assert.equal(top(lights.get(id)), 0, `red in my zone: ${lights.get(id)}`);
+  for (const id of THEIRS) assert.deepEqual(lights.get(id), [0, 0, 0]);
+  await env.director.stop();
+});
+
+test("another plugin's effect runs along the whole wall: zone after zone, as one order", async () => {
+  const env = split({ sessions: [liveSession("s1", "a1", T0)] });
+  await connect(env);
+  const combined = env.director.order;
+  // An unsplit wall whose own order is that one shows the same effect, panel for panel.
+  const whole = setup({
+    sessions: [liveSession("s1", "a1", T0)],
+    storage: { order: { ...DEFAULT_ORDER, mode: "custom", ids: combined } },
+  });
+  await connect(whole);
+  assert.deepEqual(whole.director.order, combined);
+  env.director.takeControl(CUBE, SHUFFLE, 60_000);
+  whole.director.takeControl(CUBE, SHUFFLE, 60_000);
+  await env.clock.advance(SETTLED);
+  await whole.clock.advance(SETTLED);
+  assert.deepEqual(lastFrame(env).lights, lastFrame(whole).lights);
+  assert.ok(lastFrame(env).lights.some(([, rgb]) => rgb[1] > 0) && lastFrame(env).lights.some(([, rgb]) => rgb[0] > 0));
+  await env.director.stop();
+  await whole.director.stop();
+});
+
+test("a schedule before the link is up (layout stored, or not yet) waits for the wall and plays once it is taken", async () => {
+  for (const stored of [true, false]) {
+    const env = setup(stored ? {} : { storage: { layout: null } });
+    const layout = env.storage.map.get("layout") ?? layoutFromPanelLayout(duck, env.device.id, new Date(T0).toISOString());
+    env.director.start();
+    env.director.alert("a2");
+    await env.clock.advance(1000);
+    if (!stored) env.storage.map.set("layout", layout);
+    env.director.setLink(env.link);
+    await env.clock.advance(ALERT_BEAT_MS / 2);
+    assert.equal(env.director.inControl, true, `taken for it (layout stored: ${stored})`);
+    const green = toLedRgb(parseColor(GREEN));
+    for (const [, rgb] of lastFrame(env).lights) assert.ok(rgb[1] > rgb[0] && levelOf(rgb, green) > 0.9, `${rgb}`);
+    await env.director.stop();
+  }
+});
+
+test("a pin beside a session is scaled against the brightness the controller is at, until the write lands", async () => {
+  const settings = { maxBrightness: 80, pinnedBrightness: 20, pinnedStyle: "glow" };
+  const pinned = [activity("a1", PURPLE), activity("a2", GREEN, { pinned: true })];
+  const alone = setup({ activities: pinned, settings });
+  await connect(alone);
+  await alone.clock.advance(SETTLED);
+  const green = toLedRgb(parseColor(GREEN));
+  const own = levelOf(new Map(lastFrame(alone).lights).get(THEIRS[0]), green);
+  await alone.director.stop();
+
+  const env = split({ activities: pinned, settings, sessions: [liveSession("s1", "a1", T0)] });
+  await connect(env);
+  await env.clock.advance(SETTLED);
+  // Hold the next brightness write.
+  const write = env.device.client.setState;
+  let land;
+  env.device.client.setState = (patch, options) =>
+    new Promise((resolve, reject) => {
+      land = () => write(patch, options).then(resolve, reject);
+    });
+  endLive(env, "s1");
+  await env.clock.advance(SETTLED);
+  assert.equal(typeof land, "function", "the write to Pinned brightness is on its way");
+  assert.equal(env.device.state.brightness, 80, "the controller is still at Session brightness");
+  for (const id of THEIRS) {
+    const level = levelOf(lightsOf(env).get(id), green);
+    assert.ok(Math.abs(level - (own * 20) / 80) < 0.01, `still scaled while the write is held: ${level} vs ${own}`);
+  }
+  land();
+  await env.clock.advance(200);
+  assert.equal(env.device.state.brightness, 20);
+  for (const id of DUCK) assert.ok(Math.abs(levelOf(lightsOf(env).get(id), green) - own) < 0.01, "unscaled once it lands");
+  env.device.client.setState = write;
+  await env.director.stop();
+});
+
+test("a schedule alert while the zones are being edited isn't played, then or later", async () => {
+  const env = split({ sessions: [liveSession("s1", "a1", T0), theirSession("s2", "a2", T0)] });
+  await connect(env);
+  await env.clock.advance(SETTLED);
+  env.director.preview({ mode: "zones", ttlMs: 10_000 });
+  await env.clock.advance(200);
+  assert.deepEqual(env.director.alert("a3", [OTHER]), { shown: false });
+  env.director.preview({ mode: "none" });
+  for (let i = 0; i < 25; i++) {
+    await env.clock.advance(100);
+    for (const id of THEIRS) assert.ok(!isRed(lightsOf(env).get(id)), "never red");
+  }
+  // One waiting for the wall is dropped when the zone-editing preview starts.
+  const idle = split();
+  idle.director.start();
+  assert.equal(idle.director.alert("a3", [OTHER]).shown, false, "waiting: no link yet");
+  idle.director.preview({ mode: "zones", ttlMs: 400 });
+  idle.director.setLink(idle.link);
+  await idle.clock.advance(0);
+  assert.equal(idle.director.inControl, true);
+  for (let i = 0; i < 25; i++) {
+    await idle.clock.advance(100);
+    if (idle.director.inControl) for (const id of THEIRS) assert.ok(!isRed(lightsOf(idle).get(id)), "never red");
+  }
+  await env.director.stop();
+  await idle.director.stop();
+});
+
+test("a yield holds for the zones that are drawn: a zone with no panels changing doesn't take the wall back", async () => {
+  const env = split({
+    sessions: [liveSession("s1", "a1", T0)],
+    storage: {
+      zones: [
+        { id: "wall", member: USER },
+        { id: "z2", member: OTHER, panels: [] },
+      ],
+    },
+  });
+  await connect(env);
+  assert.deepEqual(env.director.zones[1].panels, [], "their zone has no panels yet");
+  await env.clock.advance(DEFAULT_TIMINGS.ownWriteMs + 100);
+  env.director.onDeviceEvent({ effect: "Flames" });
+  assert.equal(env.director.yieldedKey, "live:s1");
+  env.data.sessions = [theirSession("s2", "a2", T0 + 5000), ...env.data.sessions];
+  env.director.update();
+  await env.clock.advance(0);
+  assert.equal(env.director.inControl, false, "nothing it draws changed");
+  assert.equal(env.director.output.mode, "yielded");
+  endLive(env, "s1");
+  startLive(env, "a2", "s3", T0 + 6000);
+  await env.clock.advance(0);
+  assert.equal(env.director.inControl, true, "my zone changed: the wall comes back");
+  await env.director.stop();
+});
+
+test("a preview for a zone that goes ends; a waiting alert whose zones are gone is dropped", async () => {
+  const env = split({ sessions: [liveSession("s1", "a1", T0)] });
+  await connect(env);
+  env.director.preview({ mode: "draft", panelIds: [THEIRS[0]], zoneId: "z2", ttlMs: 10_000 });
+  assert.equal(env.director.drafting, true);
+  await env.storage.set("zones", [{ id: "wall", member: USER }]);
+  env.director.update();
+  assert.equal(env.director.drafting, false, "their zone is gone: the draft ends, it doesn't move to mine");
+  assert.equal(env.director.output.mode, "live");
+  await env.director.stop();
+
+  const idle = split();
+  idle.director.start();
+  assert.equal(idle.director.alert("a3", [OTHER]).shown, false, "waiting: no link yet");
+  await idle.storage.set("zones", [{ id: "wall", member: USER }]);
+  idle.director.update();
+  idle.director.setLink(idle.link);
+  await idle.clock.advance(0);
+  assert.equal(idle.director.inControl, false, "nothing left to play it in");
+  await idle.director.stop();
 });

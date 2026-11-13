@@ -1,8 +1,6 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { placeLayout } from "../../../../shared/geometry.ts";
-import { fillSpans, resolveOrder } from "../../../../shared/order.ts";
-import { useDrawnLight } from "../../hooks/useDrawnLight.ts";
-import { useRenderState } from "../../hooks/useRenderState.ts";
+import { NO_ZONE_PREVIEW, useWallLight } from "../../hooks/useDrawnLight.ts";
 import { useScene } from "../../hooks/useScene.ts";
 import { accentRgb } from "../../lib/color.ts";
 import { useModel } from "../../model.ts";
@@ -13,7 +11,7 @@ import { layoutStage } from "./stageLayout.ts";
 const NOOP = () => {};
 
 /**
- * The wall drawn small, filling its box and lit by the same render state as the full drawing: what shows now (greyed
+ * The wall drawn small, filling its box and lit by the same render states as the full drawing (every zone's own): what shows now (greyed
  * while the wall isn't showing it) at the wall's brightness, without numbers, previews (but a brightness slider's)
  * or taps. For a glance (the phone's Wall tab); the full
  * drawing is the stage's.
@@ -21,7 +19,7 @@ const NOOP = () => {};
 export function LitWall({ pad = 10, floor = true }: { pad?: number; floor?: boolean }) {
   const model = useModel();
   const scene = useScene();
-  const { layout, settings, order } = model;
+  const { layout, settings } = model;
   const box = useRef<HTMLSpanElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
 
@@ -36,14 +34,12 @@ export function LitWall({ pad = 10, floor = true }: { pad?: number; floor?: bool
   }, []);
 
   const placed = useMemo(() => (layout ? placeLayout(layout, settings.viewRotation) : null), [layout, settings.viewRotation]);
-  const resolved = useMemo(() => (placed ? resolveOrder(order, placed.panels) : []), [order, placed]);
-  const spans = useMemo(() => (placed ? fillSpans(order, placed.panels, resolved) : null), [order, placed, resolved]);
   const stage = useMemo(
     () => (placed && size.w > 0 && size.h > 0 ? layoutStage(placed, size.w, size.h, pad) : null),
     [placed, size.w, size.h, pad],
   );
-  const drawn = useDrawnLight(null);
-  const stateRef = useRenderState(scene, drawn.preview);
+  // Every zone lit by its own scene, merged, as the full drawing (without its tags).
+  const drawn = useWallLight(placed, NO_ZONE_PREVIEW);
   const accent = useMemo(() => accentRgb(scene.cssColor), [scene.cssColor]);
 
   return (
@@ -51,9 +47,7 @@ export function LitWall({ pad = 10, floor = true }: { pad?: number; floor?: bool
       {stage && (
         <StageCanvas
           stage={stage}
-          stateRef={stateRef}
-          order={resolved}
-          spans={spans}
+          lights={drawn.source}
           drafting={false}
           // Greyed, as the full drawing is, while the wall isn't showing it.
           muted={!onWall(model).showing && drawn.preview === null}

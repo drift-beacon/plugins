@@ -6,7 +6,7 @@
  * UI's program too. The handlers are in main/src/index.ts.
  */
 import type { ValueSchema } from "@drift-beacon/plugin";
-import type { FoundController } from "./types.ts";
+import type { FoundController, TouchGesture } from "./types.ts";
 
 /** What `pair` answers: the controller's name and model, and how many panels it lights. */
 export interface PairResult {
@@ -17,17 +17,27 @@ export interface PairResult {
 
 /**
  * A `preview` request: the wall shows it for `ttlMs` (default 4000); `none` ends the asking copy's preview. `draft` is
- * tap to order holding the wall: `panelIds` are the panels numbered so far.
+ * tap to order holding the wall: `panelIds` are the panels numbered so far. `fill`, `order` and `draft` apply to one
+ * zone (`zoneId`, the first zone when left out): the other zones keep showing what they show, except under `draft`,
+ * which holds the whole wall with them dark. `identify` lights panels wherever they are. `zones` is the zone-editing
+ * preview: every zone in its tag colour (shared/zones.ts `zoneTagLights`); it takes no other field.
  */
 export interface PreviewRequest {
-  readonly mode: "none" | "identify" | "fill" | "order" | "draft";
+  readonly mode: "none" | "identify" | "fill" | "order" | "draft" | "zones";
   /** identify: the panels to light; draft: the panels numbered so far. */
   readonly panelIds?: readonly number[];
   /** fill: how much of the goal to show, 0–1. */
   readonly fraction?: number;
   /** Whose colour to preview; defaults to what is showing. */
   readonly activityId?: string | null;
+  /** fill, order and draft: the zone it applies to (a stored zone id); left out, or no zone now, the first zone. */
+  readonly zoneId?: string;
   readonly ttlMs?: number;
+}
+
+/** Whether any touch stream packet has arrived since main last connected to this controller. */
+export interface TouchStreamInfo {
+  readonly heard: boolean;
 }
 
 /**
@@ -65,10 +75,23 @@ declare module "@drift-beacon/plugin" {
     numbering: { input: { readonly on: boolean }; output: undefined };
     /** Main's time (epoch ms): the clock a controller's effect runs on (`ControlEffect.startedAt`). */
     clock: { output: { now: number } };
+    /**
+     * Whether the controller's touch stream has been heard since main last connected to it: without it, a swipe on a
+     * split wall acts nowhere (it can't be placed in a zone).
+     */
+    touchStream: { output: TouchStreamInfo };
   }
   interface PluginUiMessages {
     pairing: { readonly step: PairingStep };
     controllerChanged: { readonly change: ControllerChange };
+    /** `touchStream` changed (a first packet arrived, or main connected again): told to every open copy. */
+    touchStream: TouchStreamInfo;
+    /**
+     * Where a gesture on the wall acts, told to every open copy once main knows (for a swipe on a split wall, once the
+     * touch stream has placed it): the zone's id, or null when it acts in none. Whatever its action then does; not for
+     * a touch tap to order or zone editing take, nor one dropped while another gesture is being worked on.
+     */
+    gestureZone: { readonly gesture: TouchGesture; readonly zoneId: string | null };
   }
 }
 
@@ -91,10 +114,11 @@ export const PAIR_INPUT: ValueSchema = {
 export const PREVIEW_INPUT: ValueSchema = {
   type: "object",
   properties: {
-    mode: { type: "string", enum: ["none", "identify", "fill", "order", "draft"] },
+    mode: { type: "string", enum: ["none", "identify", "fill", "order", "draft", "zones"] },
     panelIds: { type: "array", items: { type: "integer" } },
     fraction: { type: "number", minimum: 0, maximum: 1 },
     activityId: { type: ["string", "null"] },
+    zoneId: { type: "string" },
     ttlMs: { type: "integer", minimum: 500, maximum: 15000 },
   },
   required: ["mode"],

@@ -7,7 +7,6 @@ import {
   readSettings,
   readZones,
   sameLayout,
-  zonesFollowing,
 } from "../../shared/storage.ts";
 import {
   type ActivityLike,
@@ -18,10 +17,12 @@ import {
   type SessionLike,
   STORAGE_KEYS,
   type TouchGesture,
+  type Zone,
 } from "../../shared/types.ts";
 import type { ControllerChange, PreviewRequest } from "../../shared/ui-channel.ts";
 import { useDriftBeacon } from "./drift-beacon.ts";
 import { clockOffset, controlOnPageClock } from "./lib/control.ts";
+import { createZoneActions } from "./lib/zone-actions.ts";
 import type { MainStatus, NanoleafModel } from "./model.ts";
 
 /** Request budgets: pairing waits for a button hold, discovery for answers, forgetting and refreshing for the device. */
@@ -127,9 +128,13 @@ export type MainChannel = Pick<
   NanoleafModel["actions"],
   "discover" | "pair" | "forget" | "refresh" | "preview" | "brightness" | "numbering"
 > &
-  Pick<NanoleafModel, "onControllerChanged" | "onResync"> & {
+  Pick<NanoleafModel, "onControllerChanged" | "onResync" | "onGestureZone"> & {
     /** How far main's clock is ahead of this page's (ms), measured with one request. */
     clockOffset(): Promise<number>;
+    /** Whether main has heard the controller's touch stream (false when it can't say). */
+    touchStream(): Promise<boolean>;
+    /** Main says the touch stream was heard, or isn't any more. Returns an unsubscribe. */
+    onTouchStream(listener: (heard: boolean) => void): () => void;
   };
 
 /** Calls each listener; one that throws is logged and the rest still hear. */
@@ -152,11 +157,19 @@ function tellAll<A extends unknown[]>(listeners: ReadonlySet<(...args: A) => voi
 export function createMainChannel(main: MainPort): MainChannel {
   const changed = new Set<(change: ControllerChange) => void>();
   const resynced = new Set<() => void>();
+  const touchStreams = new Set<(heard: boolean) => void>();
+  const gestureZones = new Set<(gesture: TouchGesture, zoneId: string | null) => void>();
   // Every change is passed on, this copy's own included (main tells every copy before it answers the one that
   // asked). Guessing which news is "ours" from a request in flight dropped another copy's change made meanwhile, for
   // good when our request then failed. Listeners are idempotent instead (model.ts `onControllerChanged`).
   main.onMessage("controllerChanged", ({ change }) => tellAll(changed, change));
   main.onResync(() => tellAll(resynced));
+  main.onMessage("touchStream", (payload) => tellAll(touchStreams, payload?.heard === true));
+  main.onMessage("gestureZone", (payload) => {
+    const { gesture, zoneId } = (payload ?? {}) as { gesture?: unknown; zoneId?: unknown };
+    if (!GESTURES.includes(gesture as TouchGesture)) return;
+    tellAll(gestureZones, gesture as TouchGesture, typeof zoneId === "string" ? zoneId : null);
+  });
 
   return {
     async discover(timeoutMs = DISCOVER_MS, signal) {
@@ -184,6 +197,7 @@ export function createMainChannel(main: MainPort): MainChannel {
       if (request.panelIds) input.panelIds = [...request.panelIds];
       if (request.fraction !== undefined) input.fraction = Math.min(Math.max(request.fraction, 0), 1);
       if (request.activityId !== undefined) input.activityId = request.activityId;
+      if (request.zoneId !== undefined) input.zoneId = request.zoneId;
       if (request.ttlMs !== undefined) input.ttlMs = clampInt(request.ttlMs, 500, 15_000);
       // A preview is a nicety: a missed one isn't worth an error.
       await main.request("preview", input, { timeoutMs: QUICK_TIMEOUT_MS }).catch(() => undefined);
@@ -200,6 +214,23 @@ export function createMainChannel(main: MainPort): MainChannel {
       const { now } = await main.request("clock", undefined, { timeoutMs: QUICK_TIMEOUT_MS });
       return clockOffset(sentAt, Date.now(), now);
     },
+    async touchStream() {
+      try {
+        const { heard } = await main.request("touchStream", undefined, { timeoutMs: QUICK_TIMEOUT_MS });
+        return heard === true;
+      } catch {
+        // Main can't say (it isn't running, or is older): nothing heard.
+        return false;
+      }
+    },
+    onGestureZone(listener) {
+      gestureZones.add(listener);
+      return () => void gestureZones.delete(listener);
+    },
+    onTouchStream(listener) {
+      touchStreams.add(listener);
+      return () => void touchStreams.delete(listener);
+    },
     onControllerChanged(listener) {
       changed.add(listener);
       return () => void changed.delete(listener);
@@ -208,6 +239,42 @@ export function createMainChannel(main: MainPort): MainChannel {
       resynced.add(listener);
       return () => void resynced.delete(listener);
     },
+  };
+}
+
+/**
+ * Keeps `set` told whether the touch stream is heard: asked at once and on every resync, then told by main's
+ * `touchStream` messages. The newest information wins: an answer is dropped when a message arrived after its question
+ * was asked, or when a later question has been answered already (a slow failure, which reads as not heard, can't
+ * undo a newer "heard"). Returns a stop.
+ */
+export function watchTouchStream(
+  channel: Pick<MainChannel, "touchStream" | "onTouchStream" | "onResync">,
+  set: (heard: boolean) => void,
+): () => void {
+  let current = true;
+  let messages = 0;
+  let asked = 0;
+  let answered = 0;
+  const ask = () => {
+    const question = ++asked;
+    const since = messages;
+    void channel.touchStream().then((heard) => {
+      if (!current || since !== messages || question < answered) return;
+      answered = question;
+      set(heard);
+    });
+  };
+  const stopHearing = channel.onTouchStream((heard) => {
+    messages++;
+    if (current) set(heard);
+  });
+  const stopResync = channel.onResync(ask);
+  ask();
+  return () => {
+    current = false;
+    stopHearing();
+    stopResync();
   };
 }
 
@@ -286,6 +353,11 @@ export function useLiveModel(): NanoleafModel {
       stop();
     };
   }, [channel]);
+  // Whether the touch stream has been heard: asked at open and whenever main may have told this copy something it
+  // missed, then kept by main's messages.
+  const [touchStreamHeard, setTouchStreamHeard] = useState(false);
+  useEffect(() => watchTouchStream(channel, setTouchStreamHeard), [channel]);
+
   const rawControl = read.control(self?.state.get("control"));
   const control = useMemo(() => controlOnPageClock(rawControl, offset), [rawControl, offset]);
 
@@ -311,10 +383,12 @@ export function useLiveModel(): NanoleafModel {
       saveOrder(next: PanelOrder) {
         return loggedWrite(ctx.storage.set(STORAGE_KEYS.order, { ...next, ids: [...next.ids] }), "panel order");
       },
-      saveZoneMember(member) {
-        const zones = zonesFollowing(ctx.storage.get(STORAGE_KEYS.zones), member);
-        return loggedWrite(ctx.storage.set(STORAGE_KEYS.zones, zones), "member to follow");
-      },
+      // Read at call time (a drag across panels lands faster than renders), judged by the shared zone rules.
+      ...createZoneActions({
+        read: () => ctx.storage.get(STORAGE_KEYS.zones),
+        write: (zones: Zone[]) => loggedWrite(ctx.storage.set(STORAGE_KEYS.zones, zones), "zones"),
+        members: () => ctx.members ?? NO_MEMBERS,
+      }),
       discover: channel.discover,
       pair: channel.pair,
       forget: channel.forget,
@@ -364,8 +438,10 @@ export function useLiveModel(): NanoleafModel {
       mainStatus,
       mainStatusReason,
       supportsGoals,
+      touchStreamHeard,
       actions,
       onTouch,
+      onGestureZone: channel.onGestureZone,
       onControllerChanged: channel.onControllerChanged,
       onResync: channel.onResync,
     }),
@@ -384,6 +460,7 @@ export function useLiveModel(): NanoleafModel {
       mainStatus,
       mainStatusReason,
       supportsGoals,
+      touchStreamHeard,
       actions,
       onTouch,
       channel,

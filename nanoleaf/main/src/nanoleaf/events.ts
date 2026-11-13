@@ -46,6 +46,12 @@ export interface EventStreamOptions {
   readonly resetAfterMs?: number;
   /** How long to wait for the answer's headers. Default: 5 s. */
   readonly connectTimeoutMs?: number;
+  /**
+   * Asks for the UDP touch stream (nanoleaf-api.md §6): sends `TouchEventsPort: <port>` on every request, so the
+   * controller sends touch packets to this machine on that port while the request is open. A function is read at
+   * each connect; null (or no option) sends no header. Only meaningful with touch (4) among `ids`.
+   */
+  readonly touchEventsPort?: number | (() => number | null);
   readonly now?: () => number;
 }
 
@@ -113,13 +119,16 @@ export class EventStream {
       req?.destroy();
       this.#dropped(error);
     };
+    const headers: Record<string, string> = { Accept: "text/event-stream" };
+    const touchPort = this.#touchEventsPort();
+    if (touchPort !== null) headers.TouchEventsPort = String(touchPort);
     try {
       req = request({
         hostname: host.startsWith("[") ? host.slice(1, -1) : host,
         port,
         path: `/api/v1/${encodeURIComponent(token)}/events?id=${ids.join(",")}`,
         method: "GET",
-        headers: { Accept: "text/event-stream" },
+        headers,
         agent: false,
       });
     } catch (error) {
@@ -157,6 +166,18 @@ export class EventStream {
       this.#opened();
     });
     req.end();
+  }
+
+  /** The touch stream's port for this request, or null to send no header. */
+  #touchEventsPort(): number | null {
+    const option = this.#options.touchEventsPort;
+    let port: number | null = null;
+    try {
+      port = typeof option === "function" ? option() : (option ?? null);
+    } catch (error) {
+      this.#options.log?.("Couldn't read the touch stream's port", error);
+    }
+    return port !== null && Number.isInteger(port) && port > 0 && port <= 0xffff ? port : null;
   }
 
   #opened(): void {

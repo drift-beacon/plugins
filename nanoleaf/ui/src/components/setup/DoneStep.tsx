@@ -4,6 +4,7 @@ import { motion, useReducedMotion } from "motion/react";
 import { useEffect, useMemo, useRef } from "react";
 import { fitView, placeLayout } from "../../../../shared/geometry.ts";
 import { resolveOrder } from "../../../../shared/order.ts";
+import { wallFillOrder } from "../../lib/zones.ts";
 import type { Point } from "../../../../shared/types.ts";
 import { useScene } from "../../hooks/useScene.ts";
 import { holderName } from "../../lib/control.ts";
@@ -33,7 +34,8 @@ function Arrival({ color }: { color: string }) {
     if (!model.layout) return null;
     const placed = placeLayout(model.layout, model.settings.viewRotation);
     if (!placed.panels.length) return null;
-    const order = resolveOrder(model.order, placed.panels);
+    // The order the wall fills by: a lone zone may keep its own (lib/zones.ts `wallFillOrder`).
+    const order = resolveOrder(wallFillOrder(model), placed.panels);
     const view = fitView(placed.bounds, W, H, 16);
     const toSvg = ([x, y]: Point) =>
       `${(x * view.scale + view.tx).toFixed(1)},${(-y * view.scale + view.ty).toFixed(1)}`;
@@ -44,7 +46,7 @@ function Arrival({ color }: { color: string }) {
       const [cx, cy] = [panel.center[0] * view.scale + view.tx, -panel.center[1] * view.scale + view.ty];
       return [{ id, i, points: inset(panel.corners, panel.center, 0.9).map(toSvg).join(" "), cx, cy }];
     });
-  }, [model.layout, model.order, model.settings.viewRotation]);
+  }, [model.layout, model.order, model.zones, model.members, model.settings.viewRotation]);
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="h-full w-full overflow-visible" aria-hidden>

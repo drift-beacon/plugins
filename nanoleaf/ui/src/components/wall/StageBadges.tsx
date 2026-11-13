@@ -282,7 +282,8 @@ function DraftBadges({ stage, fits, order, draft, focusId, accent }: BadgeLayerP
     <motion.div className="absolute inset-0" {...layerMotion}>
       {stage.panels.map((p) => {
         const fit = fits.get(p.id);
-        if (!fit) return null;
+        // Only the panels being ordered wear a ring (on a split wall, the zone's).
+        if (!fit || !rank.has(p.id)) return null;
         const n = draft.indexOf(p.id) + 1;
         const focused = focusId === p.id;
         return (

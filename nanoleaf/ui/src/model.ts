@@ -1,5 +1,5 @@
 import { createContext, createElement, type ReactNode, useContext } from "react";
-import { actingFor } from "../../shared/acting-for.ts";
+import { DEFAULT_ORDER } from "../../shared/storage.ts";
 import type {
   ActivityLike,
   ConnectionInfo,
@@ -15,6 +15,8 @@ import type {
   Zone,
 } from "../../shared/types.ts";
 import type { ControllerChange, PairingStep, PairResult, PreviewRequest } from "../../shared/ui-channel.ts";
+import { resolveZones } from "../../shared/zones.ts";
+import type { ZoneActions } from "./lib/zone-actions.ts";
 
 export type { ControllerChange, PairingStep, PairResult, PreviewRequest } from "../../shared/ui-channel.ts";
 
@@ -55,8 +57,8 @@ export interface NanoleafModel {
   /** The workspace's members, as this device last heard (none from an app that sends no roster). */
   readonly members: readonly MemberLike[];
   /**
-   * Who the wall follows, as stored: one zone, the whole wall, with one member. Who it acts for is
-   * `actingFor(zones[0]?.member, members)`, worked out where it is used.
+   * The wall's zones as stored (storage `zones`): each a group of panels belonging to one member. What stands on the
+   * wall now, and who each acts for, is `resolveZones` (lib/zones.ts `wallZones`), worked out where it is used.
    */
   readonly zones: readonly Zone[];
   readonly order: PanelOrder;
@@ -82,7 +84,12 @@ export interface NanoleafModel {
   readonly mainStatusReason: string | null;
   /** The app sends goals, periods and pins (SDK 0.2.2). Without them the wall still glows, but shows no goal or pin. */
   readonly supportsGoals: boolean;
-  readonly actions: {
+  /**
+   * The controller's touch stream has been heard since main last connected to it (main's `touchStream`): until it is,
+   * a swipe on a split wall can't be placed in a zone, so it does nothing.
+   */
+  readonly touchStreamHeard: boolean;
+  readonly actions: ZoneActions & {
     /**
      * Applies locally at once; rejects (and rolls back) when the app refuses the write. The model logs a refusal, so
      * dropping the promise is safe, but a control that can snap back should catch it and say so.
@@ -90,8 +97,6 @@ export interface NanoleafModel {
     saveSettings(patch: Partial<Settings>): Promise<void>;
     /** As `saveSettings`. */
     saveOrder(order: PanelOrder): Promise<void>;
-    /** The member the wall follows, as `saveSettings`. Keeps the zone's id. */
-    saveZoneMember(member: string): Promise<void>;
     /** Aborting `signal` ends the search in main too. */
     discover(timeoutMs?: number, signal?: AbortSignal): Promise<readonly FoundController[]>;
     /** Rejects `invalid` for an address that isn't on the local network. */
@@ -111,6 +116,12 @@ export interface NanoleafModel {
   };
   /** Physical panel touches, while the controller's event stream is open. Returns an unsubscribe. */
   onTouch(listener: (panelId: number, gesture: TouchGesture) => void): () => void;
+  /**
+   * The zone main acted in for each gesture the wall reports (main's `gestureZone`), once it has worked it out: null
+   * when it acted nowhere (a swipe on a split wall the touch stream couldn't place). A swipe's `touch` event names no
+   * panel, so on a split wall this is the only way to know where it acted. Returns an unsubscribe.
+   */
+  onGestureZone(listener: (gesture: TouchGesture, zoneId: string | null) => void): () => void;
   /**
    * The controller was paired or forgotten just now, by any copy of the interface: another tab or device, or this
    * one. A copy hears its own pairing and forgetting too (before the request's answer), so a listener must be
@@ -138,7 +149,10 @@ export function useModel(): NanoleafModel {
   return model;
 }
 
-/** Who the wall follows, worked out as main works it out: the zone's member while in the workspace, else the owner. */
+/**
+ * Who the unsplit wall follows, worked out as main works it out: the first zone that stands, acting for its member
+ * while they are in the workspace, else the owner (nobody with no roster). On a split wall each zone follows its own.
+ */
 export function followingOf(model: Pick<NanoleafModel, "members" | "zones">): string[] {
-  return actingFor(model.zones[0]?.member, model.members);
+  return [...(resolveZones(model.zones, [], model.members, DEFAULT_ORDER)[0]?.following ?? [])];
 }

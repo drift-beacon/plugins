@@ -7,6 +7,7 @@ import { useSettingsGroups } from "./SettingsPanel.tsx";
 import { Starfield } from "./Starfield.tsx";
 import { HORIZON_OVERLAP } from "./wall/Horizon.tsx";
 import type { WallParts } from "./wall/WallSection.tsx";
+import { ZoneCards } from "./zones/ZoneCards.tsx";
 
 /**
  * Several cards read as one: the children lose their own corners and rings and share this card's, with a rule
@@ -50,15 +51,19 @@ export function Board({ parts }: { parts: WallParts }) {
             <div className="relative">{parts.stage}</div>
           </div>
           <div className="relative divide-y divide-default-100/60" style={{ marginTop: -HORIZON_OVERLAP }}>
-            {/* Over the drawing's foot only as words and light: presses fall through to the panels underneath. */}
-            <div className="pointer-events-none">
-              <NowCard bare />
-            </div>
+            {/* Over the drawing's foot only as words and light: presses fall through to the panels underneath. On a
+                split wall what shows now is each zone card's. */}
+            {!parts.split && (
+              <div className="pointer-events-none">
+                <NowCard bare />
+              </div>
+            )}
             {light.brightness}
             {light.pinnedBrightness}
           </div>
         </div>
         <div className="space-y-4">
+          <ZoneCards />
           <FillCard parts={parts} />
           <ControllerCard />
         </div>

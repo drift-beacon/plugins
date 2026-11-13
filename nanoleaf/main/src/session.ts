@@ -4,8 +4,7 @@
  */
 import { deviceRgb } from "../../shared/color.ts";
 import { staticAnimData, staticDisplay } from "../../shared/protocol.ts";
-import { renderFrame } from "../../shared/render.ts";
-import type { FillSpan, Handback, RenderState, Rgb } from "../../shared/types.ts";
+import type { Handback, PanelLight, Rgb } from "../../shared/types.ts";
 import type { DirectorTimings } from "./director.ts";
 import type { DirectorClient, DirectorStream, Log, Timers } from "./ports.ts";
 import { frameChanged, throttleWait, type FrameEntry } from "./policy.ts";
@@ -59,17 +58,8 @@ export interface SessionHost {
   isCurrent(session: Session): boolean;
 }
 
-/**
- * The device colours for `order` at time `now`: renderFrame through `deviceRgb` (drive floor, hue kept). `spans` is
- * each panel's share of a goal when the order fills as a line.
- */
-export function frameAt(
-  render: RenderState,
-  order: readonly number[],
-  now: number,
-  spans: readonly FillSpan[] | null = null,
-): FrameEntry[] {
-  const lights = renderFrame(render, order, now, { spans });
+/** The device colours for `order` from a frame's lights (`deviceRgb`: drive floor, hue kept); a missing panel is dark. */
+export function frameAt(lights: ReadonlyMap<number, PanelLight>, order: readonly number[]): FrameEntry[] {
   return order.map((id) => {
     const light = lights.get(id);
     return [id, light ? deviceRgb(light) : DARK];
@@ -77,18 +67,18 @@ export function frameAt(
 }
 
 /**
- * Sends the frame for `now` if it is worth it. Streaming: when any channel changed, or `keepAliveMs` passed since the
- * last send. Static: when it changed and `staticIntervalMs` passed, one write at a time. Returns whether it sent.
+ * Sends the frame `lights` (every panel in `order`, drawn for `now`) if it is worth it. Streaming: when any channel
+ * changed, or `keepAliveMs` passed since the last send. Static: when it changed and `staticIntervalMs` passed, one
+ * write at a time. Returns whether it sent.
  */
 export function sendFrame(
   host: SessionHost,
   session: Session,
-  render: RenderState,
+  lights: ReadonlyMap<number, PanelLight>,
   order: readonly number[],
   now: number,
-  spans: readonly FillSpan[] | null = null,
 ): boolean {
-  const frame = frameAt(render, order, now, spans);
+  const frame = frameAt(lights, order);
   const { keepAliveMs, staticIntervalMs } = host.timings;
   if (session.mode === "stream") {
     if (!frameChanged(session.lastFrame, frame) && now - session.lastSentAt < keepAliveMs) return false;

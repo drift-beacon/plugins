@@ -3,6 +3,7 @@
  * another version of the plugin, another device or a person with a JSON editor. A bad or missing field falls back to
  * its default and numbers are clamped, so callers never see a half-valid value.
  */
+import { actingFor } from "./acting-for.ts";
 import { GESTURE_KINDS, GESTURES } from "./gestures.ts";
 import type {
   AutoOrder,
@@ -12,6 +13,7 @@ import type {
   Handback,
   IdleBehaviour,
   Layout,
+  MemberLike,
   OrderMode,
   PanelOrder,
   PinnedStyle,
@@ -160,22 +162,268 @@ export function readGestureActions(raw: unknown): GestureActions {
   return actions;
 }
 
-/** The id the one zone, the whole wall, is given when it is first written. It never changes. */
+/** The id the first zone, the whole wall until it is split, is given when it is first written. It never changes. */
 export const WALL_ZONE_ID = "wall";
 
-/**
- * Who the wall follows: the first entry only (one zone, the whole wall), with its id (`WALL_ZONE_ID` when it has none)
- * and its member (null unless a non-empty string). Anything else reads as no zones, so the wall follows the owner.
- */
-export function readZones(raw: unknown): Zone[] {
-  if (!Array.isArray(raw) || !isRecord(raw[0])) return [];
-  const entry = raw[0];
-  return [{ id: readText(entry.id) ?? WALL_ZONE_ID, member: readText(entry.member) }];
+/** Panel ids: the first copy of each non-negative integer (panel ids are never negative), in their stored order. */
+function readPanelIds(raw: readonly unknown[]): number[] {
+  const ids: number[] = [];
+  const seen = new Set<number>();
+  for (const id of raw) {
+    if (typeof id !== "number" || !Number.isInteger(id) || id < 0 || seen.has(id)) continue;
+    seen.add(id);
+    ids.push(id + 0);
+  }
+  return ids;
 }
 
-/** What the picker writes to `zones` for `member`: the one zone, keeping its id (`WALL_ZONE_ID` the first time). */
-export function zonesFollowing(raw: unknown, member: string): Zone[] {
-  return [{ id: readZones(raw)[0]?.id ?? WALL_ZONE_ID, member }];
+/**
+ * The wall's zones, every valid entry in stored order. An entry is an object; its id is a non-empty string, or
+ * `WALL_ZONE_ID` for the first entry read when it has none (a later entry without one, or one repeating an id read
+ * before, is left out). Its member is null unless a non-empty string. `panels` is kept when it is a list (its valid
+ * ids, see `readPanelIds`) and `order` when it is an object (`readOrder`); otherwise the key is left out, so the zone
+ * takes the panels nobody listed or the wall's order. Anything that isn't a list reads as no zones (the wall follows
+ * the owner).
+ */
+export function readZones(raw: unknown): Zone[] {
+  if (!Array.isArray(raw)) return [];
+  const zones: Zone[] = [];
+  const ids = new Set<string>();
+  for (const entry of raw) {
+    if (!isRecord(entry)) continue;
+    const id = readText(entry.id) ?? (zones.length === 0 ? WALL_ZONE_ID : null);
+    if (id === null || ids.has(id)) continue;
+    ids.add(id);
+    const zone: { id: string; member: string | null; panels?: number[]; order?: PanelOrder } = {
+      id,
+      member: readText(entry.member),
+    };
+    if (Array.isArray(entry.panels)) zone.panels = readPanelIds(entry.panels);
+    if (isRecord(entry.order)) zone.order = readOrder(entry.order);
+    zones.push(zone);
+  }
+  return zones;
+}
+
+/* ---- Edits the zone screens make: each from the stored list to the next one, or a refusal ---- */
+
+/** Why an edit to the zones was refused. */
+export type ZoneRefusal =
+  | "no-roster"
+  | "not-a-member"
+  | "has-zone"
+  | "everyone-has-zone"
+  | "last-zone"
+  | "no-zone"
+  | "split-wall"
+  | "no-change";
+
+/** Each refusal in words the screens can show. */
+export const ZONE_REFUSALS: Readonly<Record<ZoneRefusal, string>> = Object.freeze({
+  "no-roster": "This Drift Beacon doesn't say who is in the workspace.",
+  "not-a-member": "Only someone in this workspace can have a zone.",
+  "has-zone": "They have a zone already.",
+  "everyone-has-zone": "Everyone has a zone already.",
+  "last-zone": "The wall needs at least one zone.",
+  "no-zone": "That zone isn't there any more.",
+  "split-wall": "The wall has more than one zone.",
+  "no-change": "Nothing would change.",
+});
+
+/** An edit's outcome: the list to store, or why not (`reason` is `ZONE_REFUSALS[refusal]`). */
+export type ZoneEdit =
+  | { readonly ok: true; readonly zones: Zone[] }
+  | { readonly ok: false; readonly refusal: ZoneRefusal; readonly reason: string };
+
+function refuse(refusal: ZoneRefusal): ZoneEdit {
+  return { ok: false, refusal, reason: ZONE_REFUSALS[refusal] };
+}
+
+/** The edit's list, unless it would store exactly what is stored. */
+function edited(stored: readonly Zone[], next: Zone[]): ZoneEdit {
+  return JSON.stringify(next) === JSON.stringify(stored) ? refuse("no-change") : { ok: true, zones: next };
+}
+
+/** The lowest `z<n>` (from `z1`) that no zone in `zones` uses, so a new zone's id is unique and never `WALL_ZONE_ID`. */
+export function nextZoneId(zones: readonly Zone[]): string {
+  const used = new Set(zones.map((zone) => zone.id));
+  let n = 1;
+  while (used.has(`z${n}`)) n++;
+  return `z${n}`;
+}
+
+/**
+ * The zones the wall shows, as stored entries: what every edit starts from and all it writes back. They are exactly
+ * the zones `resolveZones` (zones.ts) keeps, in stored order, each with the member it acts for and its id, panels and
+ * order. A lone stored zone stands for the member it acts for (`actingFor`: its member, else the owner). With two or
+ * more stored, a zone whose member has left, a second zone for a member and a repeated id are dropped; if none stands,
+ * the wall is one zone (`WALL_ZONE_ID`) for the owner. Null with an empty roster: there is nobody to edit zones for.
+ */
+function standing(zones: readonly Zone[], members: readonly MemberLike[]): Zone[] | null {
+  if (members.length === 0) return null;
+  if (zones.length === 1) {
+    const only = zones[0] as Zone;
+    return [{ ...only, member: actingFor(only.member, members)[0] ?? null }];
+  }
+  const kept: Zone[] = [];
+  const ids = new Set<string>();
+  const zoned = new Set<string>();
+  for (const zone of zones) {
+    const member = zone.member;
+    if (member === null || !members.some((m) => m.id === member) || zoned.has(member) || ids.has(zone.id)) continue;
+    zoned.add(member);
+    ids.add(zone.id);
+    kept.push(zone);
+  }
+  return kept.length > 0 ? kept : [{ id: WALL_ZONE_ID, member: actingFor(null, members)[0] ?? null }];
+}
+
+/**
+ * The members without a zone, in the roster's order: the only people a new zone, or a zone given away, can be for.
+ * Every member, with no zone standing for any of them, is free; an empty roster has nobody.
+ */
+export function freeMembers(zones: readonly Zone[], members: readonly MemberLike[]): MemberLike[] {
+  const zoned = new Set((standing(zones, members) ?? []).map((zone) => zone.member));
+  return members.filter((member) => !zoned.has(member.id));
+}
+
+/**
+ * What the unsplit wall's picker ("This wall follows") writes for `member`: the one zone the wall shows, given to them,
+ * keeping its id (`WALL_ZONE_ID` the first time), panels and order. With the roster (`members`, as the screens pass
+ * it) it is an edit like the others: refused with no roster, for someone outside the workspace, on a wall with more
+ * than one zone standing (the zone screens use `giveZone` there), and when nothing would change.
+ *
+ * Called without the roster (main and the interface before zones), it can't tell which zones stand: a stored list of
+ * at most one entry gives that entry (or a new `WALL_ZONE_ID` one) to `member`, as before zones; a longer stored list
+ * comes back as read, unchanged, so the call can never give one member two zones.
+ */
+export function zonesFollowing(raw: unknown, member: string): Zone[];
+export function zonesFollowing(raw: unknown, member: string, members: readonly MemberLike[]): ZoneEdit;
+export function zonesFollowing(raw: unknown, member: string, members?: readonly MemberLike[]): Zone[] | ZoneEdit {
+  const stored = readZones(raw);
+  if (!members) {
+    if (stored.length > 1) return stored;
+    const first = stored[0];
+    return [first ? { ...first, member } : { id: WALL_ZONE_ID, member }];
+  }
+  const shown = standing(stored, members);
+  if (!shown) return refuse("no-roster");
+  if (!members.some((m) => m.id === member)) return refuse("not-a-member");
+  if (shown.length > 1) return refuse("split-wall");
+  return edited(stored, [{ ...(shown[0] as Zone), member }]);
+}
+
+/**
+ * Adds a zone for `member`, who must be in the workspace and have none, after the zones that stand, with an id none of
+ * them uses and no panels yet. A wall that is one zone splits cleanly: that zone is stored with the member it acts for
+ * and keeps every panel, since it lists none, until panels are moved.
+ */
+export function addZone(zones: readonly Zone[], member: string, members: readonly MemberLike[]): ZoneEdit {
+  const shown = standing(zones, members);
+  if (!shown) return refuse("no-roster");
+  if (!members.some((m) => m.id === member)) return refuse("not-a-member");
+  if (shown.length >= members.length) return refuse("everyone-has-zone");
+  if (shown.some((zone) => zone.member === member)) return refuse("has-zone");
+  return edited(zones, [...shown, { id: nextZoneId(shown), member, panels: [] }]);
+}
+
+/** Where a removed zone's panels go (`removeZone`): the zone `to`, which needs the wall's panel ids to name them all. */
+export interface PanelsGoTo {
+  readonly to: string;
+  /** The wall's light panels (`placeLayout(...).panels`' ids). */
+  readonly panelIds: Iterable<number>;
+}
+
+/**
+ * Removes a standing zone; never the last. Its panels go to the first zone that remains (they are then listed
+ * nowhere, or only by it), or, with `give`, to the zone named there: every panel the removed zone holds on the wall
+ * is then listed in that zone.
+ */
+export function removeZone(
+  zones: readonly Zone[],
+  id: string,
+  members: readonly MemberLike[],
+  give?: PanelsGoTo,
+): ZoneEdit {
+  const shown = standing(zones, members);
+  if (!shown) return refuse("no-roster");
+  const at = shown.findIndex((zone) => zone.id === id);
+  if (at < 0) return refuse("no-zone");
+  if (shown.length <= 1) return refuse("last-zone");
+  const rest = shown.filter((zone) => zone.id !== id);
+  if (!give) return edited(zones, rest);
+  if (give.to === id || !rest.some((zone) => zone.id === give.to)) return refuse("no-zone");
+  // What it holds, by the rules `resolveZones` uses: what it lists that no zone before it lists, and, as the first,
+  // every panel nobody lists.
+  const before = new Set(shown.slice(0, at).flatMap((zone) => zone.panels ?? []));
+  const listed = new Set(shown.flatMap((zone) => zone.panels ?? []));
+  const own = new Set((shown[at] as Zone).panels ?? []);
+  const held = [...new Set(give.panelIds)].filter(
+    (panel) => (own.has(panel) && !before.has(panel)) || (at === 0 && !listed.has(panel)),
+  );
+  return edited(zones, moveInto(rest, give.to, held));
+}
+
+/**
+ * Gives a standing zone to `member`, who must be in the workspace and have no zone; its panels and order stay. There is
+ * no way to swap two people's zones: with everyone zoned, a zone can only be given back to its own member.
+ */
+export function giveZone(zones: readonly Zone[], id: string, member: string, members: readonly MemberLike[]): ZoneEdit {
+  const shown = standing(zones, members);
+  if (!shown) return refuse("no-roster");
+  if (!shown.some((zone) => zone.id === id)) return refuse("no-zone");
+  if (!members.some((m) => m.id === member)) return refuse("not-a-member");
+  if (shown.some((zone) => zone.member === member)) return refuse("has-zone");
+  return edited(zones, shown.map((zone) => (zone.id === id ? { ...zone, member } : zone)));
+}
+
+/** `zones` with `ids` listed in zone `id` (after what it lists already, which keeps its place) and off every other list. */
+function moveInto(zones: readonly Zone[], id: string, ids: readonly number[]): Zone[] {
+  const taken = new Set(ids);
+  return zones.map((zone) => {
+    const kept = zone.panels?.filter((panel) => !taken.has(panel));
+    if (zone.id === id) {
+      const listed = new Set(zone.panels ?? []);
+      return { ...zone, panels: [...(zone.panels ?? []), ...ids.filter((panel) => !listed.has(panel))] };
+    }
+    return kept && kept.length !== zone.panels?.length ? { ...zone, panels: kept } : zone;
+  });
+}
+
+/**
+ * Moves panel ids into a standing zone: listed there (after the ones it lists already, which keep their place), and
+ * taken off every other zone's list. A zone that lists nothing keeps listing nothing. Ids that aren't valid panel ids are ignored.
+ */
+export function movePanels(
+  zones: readonly Zone[],
+  id: string,
+  panelIds: readonly number[],
+  members: readonly MemberLike[],
+): ZoneEdit {
+  const shown = standing(zones, members);
+  if (!shown) return refuse("no-roster");
+  if (!shown.some((zone) => zone.id === id)) return refuse("no-zone");
+  return edited(zones, moveInto(shown, id, readPanelIds(panelIds)));
+}
+
+/** Sets how a standing zone fills; null takes its own order away, so it fills by the wall's. */
+export function setZoneOrder(
+  zones: readonly Zone[],
+  id: string,
+  order: PanelOrder | null,
+  members: readonly MemberLike[],
+): ZoneEdit {
+  const shown = standing(zones, members);
+  if (!shown) return refuse("no-roster");
+  if (!shown.some((zone) => zone.id === id)) return refuse("no-zone");
+  return edited(
+    zones,
+    shown.map((zone) => {
+      if (zone.id !== id) return zone;
+      const { order: _old, ...rest } = zone;
+      return order ? { ...rest, order: { ...order, ids: [...order.ids] } } : rest;
+    }),
+  );
 }
 
 /**
@@ -184,15 +432,7 @@ export function zonesFollowing(raw: unknown, member: string): Zone[] {
  */
 export function readOrder(raw: unknown): PanelOrder {
   if (!isRecord(raw)) return DEFAULT_ORDER;
-  const ids: number[] = [];
-  if (Array.isArray(raw.ids)) {
-    const seen = new Set<number>();
-    for (const id of raw.ids) {
-      if (typeof id !== "number" || !Number.isInteger(id) || id < 0 || seen.has(id)) continue;
-      seen.add(id);
-      ids.push(id + 0);
-    }
-  }
+  const ids = Array.isArray(raw.ids) ? readPanelIds(raw.ids) : [];
   return {
     mode: readOneOf(raw.mode, ORDER_MODES, DEFAULT_ORDER.mode),
     auto: readOneOf(raw.auto, AUTO_ORDERS, DEFAULT_ORDER.auto),

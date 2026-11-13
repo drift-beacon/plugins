@@ -1,38 +1,49 @@
 /**
  * The Director turns what should show (scene.ts) into light on the wall: it wants the controller when there is
  * something to show, streams frames from render.ts at 10 Hz, lets go after a short grace, yields to anyone else who
- * changes the wall, and publishes `output`. Decisions are in policy.ts, the takeover and hand-back in wall.ts, and the
- * per-tick I/O in session.ts; this class holds the inputs. Clock, timers, client and stream are injected.
+ * changes the wall, and publishes `output`. The wall is drawn zone by zone (zones.ts, zone-render.ts): each zone shows
+ * its own member's scene with its own render state, merged into one frame; an unsplit wall is one zone. Decisions are
+ * in policy.ts, the takeover and hand-back in wall.ts, and the per-tick I/O in session.ts; this class holds the
+ * inputs. Clock, timers, client and stream are injected.
  */
-import { actingFor } from "../../shared/acting-for.ts";
+import { speaksTo } from "../../shared/acting-for.ts";
 import { parseColor, toLedRgb, WARM_WHITE } from "../../shared/color.ts";
 import { effectDuration, type EffectSpec, sameSpec } from "../../shared/effects.ts";
 import { placeLayout } from "../../shared/geometry.ts";
-import { fillSpans, resolveOrder } from "../../shared/order.ts";
-import {
-  advance,
-  alerting,
-  DRAFT_BRIGHTNESS,
-  fromDark,
-  initialRenderState,
-  withAlert,
-  withPreview,
-} from "../../shared/render.ts";
-import { decideScene, OFF_SCENE } from "../../shared/scene.ts";
+import { alerting, DRAFT_BRIGHTNESS, fromDark, withAlert, withPreview } from "../../shared/render.ts";
+import { decideZoneScenes, OFF_SCENE, outputScene, wallSceneKey, type ZoneScene } from "../../shared/scene.ts";
 import { DEFAULT_SETTINGS, readLayout, readOrder, readSettings, readZones } from "../../shared/storage.ts";
 import {
   type ControlEffect,
   type ControlInfo,
   type ControllerConfig,
-  type FillSpan,
+  type MemberLike,
   type OutputInfo,
+  type PanelLight,
   type Preview,
-  type RenderState,
+  type ResolvedZone,
   type Rgb,
   type Scene,
   type Settings,
   STORAGE_KEYS,
 } from "../../shared/types.ts";
+import {
+  advanceZones,
+  renderZones,
+  updateZones,
+  type WallBrightness,
+  zoneScales,
+  zonesBrightness,
+  type ZoneStates,
+} from "../../shared/zone-render.ts";
+import {
+  combinedOrder,
+  drawnZones,
+  resolveZones,
+  type ZoneFill,
+  zoneFills,
+  zoneTagLights,
+} from "../../shared/zones.ts";
 import type { PreviewRequest } from "../../shared/ui-channel.ts";
 import { type ClaimOwner, holder, markYielded, yieldedMark } from "./claims.ts";
 import {
@@ -167,6 +178,26 @@ interface RememberedAnswer {
   readonly answer: ControlAnswer;
 }
 
+/**
+ * An interface preview's lease. `preview` is null for the zone-editing preview (`zones`), which draws every zone in its
+ * tag colour rather than going through the render states. `zoneId` is the zone a fill, Play order or tap to order was
+ * asked for (null: the first zone); it is resolved against the zones each time, since they can change under it.
+ */
+interface Lease {
+  readonly preview: Preview | null;
+  readonly zoneId: string | null;
+  readonly until: number;
+  /** The interface copy holding it (null: nobody's). */
+  readonly owner: string | null;
+}
+
+/** A schedule alert waiting for the wall to be taken: its colour, when it is dropped, and the zones it plays in. */
+interface WaitingAlert {
+  readonly rgb: Rgb;
+  readonly until: number;
+  readonly zones: ReadonlySet<string>;
+}
+
 /** How many `requestId`s are remembered per holder. */
 const REQUEST_MEMORY = 8;
 
@@ -183,12 +214,21 @@ export class Director {
   #link: Link = NO_LINK;
   #settings: Settings = DEFAULT_SETTINGS;
   #enabled: boolean | null = null;
-  #scene: Scene = OFF_SCENE;
-  #render: RenderState | null = null;
+  /** The zones as they stand on this wall now (zones.ts `resolveZones`), in stored order. */
+  #zones: readonly ResolvedZone[] = [];
+  /** Each zone's fill order and line spans over its own panels, and where it sits in `#order`. */
+  #fills: readonly ZoneFill[] = [];
+  /** The wall's one order: each zone's, one zone after another (`combinedOrder`). One zone: the wall's fill order. */
   #order: readonly number[] = [];
-  /** Each panel's share of a goal when the order fills as a line (null one panel at a time), parallel to `#order`. */
-  #spans: readonly FillSpan[] | null = null;
-  #orderKey = "";
+  #zonesKey = "";
+  /** Each zone's scene, in the zones' order. */
+  #scenes: readonly ZoneScene[] = [];
+  /** The scene `output` speaks for (`outputScene`). */
+  #scene: Scene = OFF_SCENE;
+  /** The drawn zones' scene keys joined (`wallSceneKey`; every zone's while none has panels): what a yield holds for. */
+  #wallKey: string = OFF_SCENE.key;
+  /** Each zone's render state, by zone id. */
+  #states: ZoneStates | null = null;
   #lastRecompute = -Infinity;
   #yieldedKey: string | null = null;
   #yieldNote: string | null = null;
@@ -196,8 +236,8 @@ export class Director {
   #yieldMark: number | null = null;
   /** The last yield mark it has seen, so it adopts each one once. */
   #seenMark: number | null = null;
-  /** The running preview: what it shows, when it lapses, and the interface copy holding it (null: nobody's). */
-  #lease: { readonly preview: Preview; readonly until: number; readonly owner: string | null } | null = null;
+  /** The running preview: what it shows, where, when it lapses, and the interface copy holding it. */
+  #lease: Lease | null = null;
   /** The lock a controller holds (`takeControl`): its effect shows in place of the workspace's own scene. */
   #control: ControlLock | null = null;
   /** Recent `takeControl` answers per holder, newest first, by `requestId`. */
@@ -206,7 +246,7 @@ export class Director {
   #ids = 0;
   #override: { readonly value: number; readonly until: number } | null = null;
   /** Schedule alerts waiting for the wall to be taken, oldest first: each is dropped once `until` passes. */
-  #waiting: readonly { readonly rgb: Rgb; readonly until: number }[] = [];
+  #waiting: readonly WaitingAlert[] = [];
   #unwantedSince: number | null = null;
   /** Set by `handBack()`: take nothing until the connection changes. */
   #hold = false;
@@ -257,8 +297,24 @@ export class Director {
     return this.#drafting;
   }
 
+  /** The zone-editing preview stands: every zone in its tag colour, and taps on the wall are the editor's. */
+  get editingZones(): boolean {
+    return this.#lease !== null && this.#lease.preview === null;
+  }
+
+  /** The scene `output` speaks for: on an unsplit wall, the wall's scene. */
   get scene(): Scene {
     return this.#scene;
+  }
+
+  /** Each zone's scene, in the zones' order. */
+  get scenes(): readonly ZoneScene[] {
+    return this.#scenes;
+  }
+
+  /** The zones as they stand on this wall now; their panels are the wall's light panels. */
+  get zones(): readonly ResolvedZone[] {
+    return this.#zones;
   }
 
   get yieldedKey(): string | null {
@@ -270,7 +326,7 @@ export class Director {
     return this.#output;
   }
 
-  /** The resolved fill order (panel ids). */
+  /** The wall's order (panel ids): each zone's fill order, one zone after another. One zone: its fill order. */
   get order(): readonly number[] {
     return this.#order;
   }
@@ -343,6 +399,12 @@ export class Director {
    * is the named activity's, else the scene's. A `draft` (tap to order) holds the wall in its own colours at
    * `DRAFT_BRIGHTNESS`, takes it even from a yield, and keeps schedule alerts off it. `shown`: it is (or is becoming)
    * in control.
+   *
+   * Zones: `identify` shows in every zone (it names panels). `fill` and `order` show in the zone `zoneId` names (the
+   * first zone when it is left out), and the other zones keep their scenes. `draft` holds the whole wall: the named
+   * zone shows the draft and the others are dark. A `zoneId` that names no zone standing now is taken as `none`, and a
+   * lease whose zone stops standing ends (a draft's numbered panels belong to that zone). `zones` shows every zone in
+   * its tag colour; schedule alerts waiting for the wall are dropped, since they wouldn't be seen.
    */
   preview(request: PreviewRequest, owner: string | null = null): { shown: boolean } {
     if (this.#stopped) return { shown: false };
@@ -354,16 +416,25 @@ export class Director {
     }
     const rgb = this.#colourOf(request.activityId ?? null);
     const panelIds = (request.panelIds ?? []).filter((id) => Number.isInteger(id));
-    const preview: Preview =
-      request.mode === "identify"
-        ? { mode: "identify", panelIds, rgb }
-        : request.mode === "draft"
-          ? { mode: "draft", panelIds, rgb: null }
-          : request.mode === "fill"
-            ? { mode: "fill", fraction: Math.min(1, Math.max(0, request.fraction ?? 0)), rgb }
-            : { mode: "order", rgb };
-    this.#lease = { preview, until: now + (request.ttlMs ?? this.timings.previewTtlMs), owner };
-    this.#render = withPreview(this.#render ?? initialRenderState(this.#scene, now), preview, now);
+    const preview: Preview | null =
+      request.mode === "zones"
+        ? null
+        : request.mode === "identify"
+          ? { mode: "identify", panelIds, rgb }
+          : request.mode === "draft"
+            ? { mode: "draft", panelIds, rgb: null }
+            : request.mode === "fill"
+              ? { mode: "fill", fraction: Math.min(1, Math.max(0, request.fraction ?? 0)), rgb }
+              : { mode: "order", rgb };
+    const zoneId = preview !== null && preview.mode !== "identify" ? (request.zoneId ?? null) : null;
+    if (zoneId !== null && !this.#zones.some((zone) => zone.id === zoneId)) {
+      const held = this.#lease?.owner ?? null;
+      if (held === null || owner === null || held === owner) this.#endLease(now);
+      return { shown: false };
+    }
+    this.#lease = { preview, zoneId, until: now + (request.ttlMs ?? this.timings.previewTtlMs), owner };
+    if (preview === null) this.#waiting = [];
+    this.#applyLease(now);
     this.#evaluate(now);
     return { shown: this.#wants() };
   }
@@ -381,27 +452,36 @@ export class Director {
 
   /**
    * A schedule just fired for this activity: the wall swells twice in its colour (warm white when it has none), over
-   * whatever shows, a preview included, but not tap to order, whose alert is dropped. When the plugin isn't driving the
+   * whatever shows, a preview included, but not tap to order or the zone-editing preview, whose alerts are dropped. It
+   * swells in the zones whose member the schedule speaks to (`members`, the schedule's; left out, every zone), each as
+   * that zone's own alert, among the zones that are drawn (every zone while none has panels, as before the layout is
+   * known); when it speaks to none of them, nothing happens. When the plugin isn't driving the
    * wall it takes it for the alert, which starts
    * once the wall is its own; an alert that can't start within `alertWaitMs` is dropped, never played late (the wall
    * is yielded, someone else's, disconnected, or driven by static writes, which can't swell). Nothing happens with
    * the `scheduleAlert` setting or driving switched off. `shown`: it plays, or the wall is being taken for it.
    */
-  alert(activityId: string | null): { shown: boolean } {
+  alert(activityId: string | null, members?: readonly string[]): { shown: boolean } {
     if (this.#stopped || !this.#started) return { shown: false };
     const now = this.#now();
     this.#recompute(now);
     if (!this.#settings.enabled || !this.#settings.scheduleAlert) return { shown: false };
-    if (this.#drafting) return { shown: false };
+    if (this.#drafting || this.editingZones) return { shown: false };
+    const zones = new Set(
+      this.#shownZones()
+        .filter((zone) => members === undefined || speaksTo(members, zone.following))
+        .map((zone) => zone.id),
+    );
+    if (zones.size === 0) return { shown: false };
     const rgb = this.#colourOf(activityId) ?? WARM_WHITE;
     const session = this.#wall.session;
     if (session) {
-      if (session.mode !== "stream") return { shown: false };
-      this.#render = withAlert(this.#render ?? initialRenderState(this.#scene, now), rgb, now);
+      if (session.mode !== "stream" || !this.#states) return { shown: false };
+      this.#states = updateZones(this.#states, (state, id) => (zones.has(id) ? withAlert(state, rgb, now) : state));
       this.#evaluate(now);
       return { shown: true };
     }
-    this.#waiting = [...this.#waiting, { rgb, until: now + this.timings.alertWaitMs }];
+    this.#waiting = [...this.#waiting, { rgb, until: now + this.timings.alertWaitMs, zones }];
     this.#evaluate(now);
     return { shown: this.#wants() };
   }
@@ -542,27 +622,102 @@ export class Director {
 
   /** Tap to order holds the wall (the running lease is a `draft`). */
   get #drafting(): boolean {
-    return this.#lease?.preview.mode === "draft";
+    return this.#lease?.preview?.mode === "draft";
   }
 
   #endLease(now: number): void {
     if (!this.#lease) return;
     this.#lease = null;
-    if (this.#render) this.#render = withPreview(this.#render, null, now);
+    this.#applyLease(now);
     this.#evaluate(now);
   }
 
   /**
+   * The zone a lease's fill, Play order or draft shows in: the one it names, the first when it names none; null when
+   * that zone no longer stands (the lease is then ended at the next recompute).
+   */
+  #leaseZone(lease: Lease): string | null {
+    if (lease.zoneId === null) return this.#zones[0]?.id ?? null;
+    return this.#zones.some((zone) => zone.id === lease.zoneId) ? lease.zoneId : null;
+  }
+
+  /** Whether the lease shows in this zone (the zone-editing preview counts, drawn in place of the render states). */
+  #leaseShowsIn(lease: Lease | null, zoneId: string): boolean {
+    if (!lease) return false;
+    if (lease.preview === null || lease.preview.mode === "identify") return true;
+    return this.#leaseZone(lease) === zoneId;
+  }
+
+  /**
+   * Puts the lease into each zone's render state (`withPreview`), and takes it out of the zones it doesn't show in:
+   * after a new lease, when it ends, and after each recompute, so a zone that just appeared gets it too. The zone-
+   * editing preview leaves the render states without a preview.
+   */
+  #applyLease(now: number): void {
+    const states = this.#states;
+    if (!states) return;
+    const lease = this.#lease;
+    const preview = lease?.preview ?? null;
+    this.#states = updateZones(states, (state, id) =>
+      withPreview(state, preview !== null && this.#leaseShowsIn(lease, id) ? preview : null, now),
+    );
+  }
+
+  /** The zones that are drawn (have panels), or every zone when none is: what showing and brightness are about. */
+  #shownZones(): readonly ResolvedZone[] {
+    return drawnZones(this.#zones);
+  }
+
+  #sceneOf(zoneId: string): Scene {
+    return this.#scenes.find((zone) => zone.id === zoneId)?.scene ?? OFF_SCENE;
+  }
+
+  /** What the wall needs (zone-render.ts `zonesBrightness`): the highest any shown zone needs, and each one's need. */
+  #wallBrightness(now: number): WallBrightness {
+    const lease = this.#lease;
+    const states = this.#states;
+    return zonesBrightness(
+      this.#settings,
+      this.#shownZones().map((zone) => {
+        const state = states?.get(zone.id);
+        return {
+          id: zone.id,
+          scene: this.#sceneOf(zone.id),
+          preview: this.#leaseShowsIn(lease, zone.id),
+          alert:
+            (state !== undefined && alerting(state, now)) ||
+            this.#waiting.some((alert) => alert.zones.has(zone.id)),
+        };
+      }),
+    );
+  }
+
+  /**
    * The brightness to drive at: tap to order's own while it holds the wall, else a running `brightness` override (a
-   * slider being dragged), else a showing pin's own brightness, else Session brightness. A preview over a pin shows at
-   * Session brightness, so it's seen however dim the pin is.
+   * slider being dragged), else the highest any zone needs: Session brightness for a session, a preview or another
+   * plugin's effect, a pin's own brightness. A preview over a pin shows at Session brightness, so it's seen however
+   * dim the pin is. On an unsplit wall that is the wall's own need.
    */
   #targetBrightness(now: number): number {
     if (this.#drafting) return DRAFT_BRIGHTNESS;
     const override = this.#override;
     if (override && now < override.until) return override.value;
-    if (this.#scene.kind === "pinned" && !this.#lease) return this.#settings.pinnedBrightness;
-    return this.#settings.maxBrightness;
+    return this.#wallBrightness(now).brightness;
+  }
+
+  /**
+   * Each zone's level scale for a frame at `now`, or null to draw every zone at 1: against the brightness the
+   * controller is at (`applied`, which lags a change of target), so a zone that needs less than another (a pin beside
+   * a session) keeps its look while the write is on its way. Null on a wall with one drawn zone (it is the target, as
+   * before zones), under tap to order, a slider's override and the zone-editing preview.
+   */
+  #scales(now: number, applied: number | null): ReadonlyMap<string, number> | null {
+    if (this.#drafting || this.editingZones) return null;
+    const override = this.#override;
+    if (override && now < override.until) return null;
+    if (this.#zones.filter((zone) => zone.panels.length > 0).length < 2) return null;
+    const { brightness, needs } = this.#wallBrightness(now);
+    return zoneScales(needs, applied ?? brightness);
   }
 
   #recompute(now: number): void {
@@ -570,7 +725,6 @@ export class Director {
     if (this.#enabled !== null && settings.enabled !== this.#enabled) this.#clearYield();
     this.#enabled = settings.enabled;
     this.#settings = settings;
-    this.#refreshOrder(settings);
     if (this.#controlOver(now)) {
       this.#control = null;
       try {
@@ -580,11 +734,21 @@ export class Director {
       }
     }
     const { activities, sessions, members } = this.#o.data();
-    const following = actingFor(readZones(this.#o.storage.get(STORAGE_KEYS.zones))[0]?.member, members);
-    const scene = decideScene({ activities, sessions, following, settings, now, control: this.#control });
-    if (this.#yieldedKey !== null && scene.key !== this.#yieldedKey) this.#clearYield();
-    this.#scene = scene;
-    this.#render = this.#render ? advance(this.#render, scene, now) : initialRenderState(scene, now);
+    this.#refreshZones(settings, members);
+    // A fill, Play order or draft for a zone that is gone ends, rather than moving to another zone.
+    const lease = this.#lease;
+    if (lease !== null && lease.zoneId !== null && this.#leaseZone(lease) === null) this.#lease = null;
+    const scenes = decideZoneScenes({ activities, sessions, settings, now, control: this.#control }, this.#zones);
+    const shown = new Set(this.#shownZones().map((zone) => zone.id));
+    const drawn = scenes.filter((zone) => shown.has(zone.id));
+    // The yield holds for what the wall draws: a zone with no panels changing doesn't take the wall back.
+    const key = wallSceneKey(drawn);
+    if (this.#yieldedKey !== null && key !== this.#yieldedKey) this.#clearYield();
+    this.#scenes = scenes;
+    this.#wallKey = key;
+    this.#scene = outputScene(drawn, sessions);
+    this.#states = advanceZones(this.#states, scenes, now);
+    this.#applyLease(now);
     this.#lastRecompute = now;
   }
 
@@ -606,28 +770,45 @@ export class Director {
     if (!mark || mark.id === this.#seenMark || this.#wall.session) return;
     this.#seenMark = mark.id;
     this.#yieldMark = mark.id;
-    this.#yieldedKey = this.#scene.key;
+    this.#yieldedKey = this.#wallKey;
     this.#yieldNote = mark.reason;
   }
 
-  /** Re-resolves the fill order when the layout, order, view rotation or controller changed. */
-  #refreshOrder(settings: Settings): void {
+  /**
+   * Re-resolves the zones and their fills when the zones, the layout, an order, the view rotation, the controller or
+   * the roster changed: `resolveZones` over the layout's light panels (none without a layout for this controller),
+   * then each zone's fill order over its own panels as they hang (`zoneFills`). Not per frame.
+   */
+  #refreshZones(settings: Settings, members: readonly MemberLike[]): void {
     const layoutRaw = this.#o.storage.get(STORAGE_KEYS.layout);
     const orderRaw = this.#o.storage.get(STORAGE_KEYS.order);
+    const zonesRaw = this.#o.storage.get(STORAGE_KEYS.zones);
     const controllerId = this.#link.controllerId;
-    const key = JSON.stringify([controllerId, settings.viewRotation, layoutRaw ?? null, orderRaw ?? null]);
-    if (key === this.#orderKey) return;
-    this.#orderKey = key;
+    const roster = members.map((member) => [member.id, member.role]);
+    const key = JSON.stringify([
+      controllerId,
+      settings.viewRotation,
+      layoutRaw ?? null,
+      orderRaw ?? null,
+      zonesRaw ?? null,
+      roster,
+    ]);
+    if (key === this.#zonesKey) return;
+    this.#zonesKey = key;
     const layout = readLayout(layoutRaw);
-    if (!layout || controllerId === null || layout.controllerId !== controllerId) {
-      this.#order = [];
-      this.#spans = null;
-      return;
-    }
-    const order = readOrder(orderRaw);
-    const panels = placeLayout(layout, settings.viewRotation).panels;
-    this.#order = resolveOrder(order, panels);
-    this.#spans = fillSpans(order, panels, this.#order);
+    const placed =
+      layout && controllerId !== null && layout.controllerId === controllerId
+        ? placeLayout(layout, settings.viewRotation).panels
+        : [];
+    const zones = resolveZones(
+      readZones(zonesRaw),
+      placed.map((panel) => panel.id),
+      members,
+      readOrder(orderRaw),
+    );
+    this.#zones = zones;
+    this.#fills = zoneFills(zones, placed);
+    this.#order = combinedOrder(this.#fills);
   }
 
   #colourOf(activityId: string | null): Rgb | null {
@@ -648,15 +829,25 @@ export class Director {
       panels: this.#order.length,
       enabled: this.#settings.enabled,
       scene: this.#scene,
+      showing: this.#shownZones().some((zone) => this.#sceneOf(zone.id).kind !== "off"),
+      sceneKey: this.#wallKey,
       previewActive: this.#lease !== null,
       draftActive: this.#drafting,
-      alertActive: this.#waiting.length > 0 || (this.#render !== null && alerting(this.#render, this.#now())),
+      alertActive: this.#waiting.length > 0 || this.#alerting(this.#now()),
       yieldedKey: this.#yieldedKey,
       claimedElsewhere: claim !== null && claim.token !== this.#o.owner.token,
       inControl: this.#wall.session !== null,
       note: this.#wall.note,
       yieldNote: this.#yieldNote,
     };
+  }
+
+  /** A schedule alert plays in some zone. */
+  #alerting(now: number): boolean {
+    const states = this.#states;
+    if (!states) return false;
+    for (const state of states.values()) if (alerting(state, now)) return true;
+    return false;
   }
 
   #wants(): boolean {
@@ -668,11 +859,14 @@ export class Director {
     if (!this.#started || this.#stopped) return;
     if (this.#lease && now >= this.#lease.until) {
       this.#lease = null;
-      if (this.#render) this.#render = withPreview(this.#render, null, now);
+      this.#applyLease(now);
     }
     if (this.#override && now >= this.#override.until) this.#override = null;
-    if (this.#waiting.some((alert) => now >= alert.until)) {
-      this.#waiting = this.#waiting.filter((alert) => now < alert.until);
+    if (this.#waiting.length > 0) {
+      // Dropped once too late, or once none of its zones is drawn any more (it would take the wall to play nothing).
+      const shown = this.#shownZones();
+      const stays = (alert: WaitingAlert) => now < alert.until && shown.some((zone) => alert.zones.has(zone.id));
+      if (!this.#waiting.every(stays)) this.#waiting = this.#waiting.filter(stays);
     }
     this.#syncYield();
 
@@ -722,23 +916,42 @@ export class Director {
   }
 
   /**
-   * The wall is ours: fade in from dark (with any preview), start the schedule alerts that waited for it (static
-   * writes can't swell, so they are dropped there) and send the first frame at once. From the tracked render
-   * state, not a fresh one: a goal met by the change that caused the takeover still shimmers, and a restart in the
-   * middle of a session whose goal was met long ago doesn't replay the shimmer.
+   * The wall is ours: every zone fades in from dark (with any preview), the schedule alerts that waited for it start in
+   * their zones (static writes can't swell, so they are dropped there) and the first frame goes at once. From the
+   * tracked render states, not fresh ones: a goal met by the change that caused the takeover still shimmers, and a
+   * restart in the middle of a session whose goal was met long ago doesn't replay the shimmer.
    */
   #tookOver(session: Session, now: number): void {
-    let render = fromDark(this.#render ?? initialRenderState(this.#scene, now), now);
-    if (session.mode === "stream") {
-      for (const alert of this.#waiting) if (now < alert.until) render = withAlert(render, alert.rgb, now);
+    if (this.#states) {
+      let states = updateZones(this.#states, (state) => fromDark(state, now));
+      if (session.mode === "stream") {
+        for (const alert of this.#waiting) {
+          if (now >= alert.until) continue;
+          states = updateZones(states, (state, id) => (alert.zones.has(id) ? withAlert(state, alert.rgb, now) : state));
+        }
+      }
+      this.#states = states;
     }
     this.#waiting = [];
-    this.#render = render;
     this.#frame(now, session);
   }
 
+  /**
+   * The wall's lights at `now`: every zone in its tag colour while the zone-editing preview stands, else each zone's
+   * render state drawn over its own fill and merged (only tap to order's zone while it holds the wall).
+   */
+  #lights(now: number, session: Session): Map<number, PanelLight> {
+    const lease = this.#lease;
+    if (lease !== null && lease.preview === null) return zoneTagLights(this.#zones);
+    if (!this.#states) return new Map();
+    return renderZones(this.#states, this.#fills, now, {
+      scales: this.#scales(now, session.applied),
+      only: this.#drafting && lease ? this.#leaseZone(lease) : null,
+    });
+  }
+
   #frame(now: number, session: Session): void {
-    if (this.#render && this.#order.length > 0) sendFrame(this.#host, session, this.#render, this.#order, now, this.#spans);
+    if (this.#states && this.#order.length > 0) sendFrame(this.#host, session, this.#lights(now, session), this.#order, now);
   }
 
   /* ---- Yield ---- */
@@ -757,7 +970,7 @@ export class Director {
   #yield(session: Session, reason: string, now: number): void {
     this.#wall.yield(reason);
     const mark = markYielded(session.controllerId, reason);
-    this.#yieldedKey = this.#scene.key;
+    this.#yieldedKey = this.#wallKey;
     this.#yieldNote = reason;
     this.#yieldMark = mark.id;
     this.#seenMark = mark.id;

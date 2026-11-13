@@ -10,7 +10,7 @@ export const THROTTLE_MS = 120;
 
 /** A preview for the wall without its lease: the lease sets and renews `ttlMs`. */
 export type WallRequest = Omit<PreviewRequest, "mode" | "ttlMs"> & {
-  readonly mode: "identify" | "fill" | "order" | "draft";
+  readonly mode: "identify" | "fill" | "order" | "draft" | "zones";
 };
 
 /** Time and timers, injectable so tests can drive the lease deterministically. */

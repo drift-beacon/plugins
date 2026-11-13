@@ -143,6 +143,57 @@ export function decideScene({ activities, sessions, following, settings, now, co
   return OFF_SCENE;
 }
 
+/* ---- Zones ---- */
+
+/** A zone's scene, by the zone's id. */
+export interface ZoneScene {
+  readonly id: string;
+  readonly scene: Scene;
+}
+
+/**
+ * Each zone's scene, in the zones' order: `decideScene` with `following` the zone's (zones.ts `resolveZones`), so a
+ * zone shows the newest running session its member is in, else the workspace's pin, else nothing. Off everywhere when
+ * driving is switched off. While another plugin holds the wall (and the setting allows it), every zone shows the one
+ * control scene, as the wall did before zones.
+ */
+export function decideZoneScenes(
+  input: Omit<SceneInput, "following">,
+  zones: readonly { readonly id: string; readonly following: readonly string[] }[],
+): ZoneScene[] {
+  if (input.settings.enabled && input.control && input.settings.allowControl) {
+    const scene = controlScene(input.control);
+    return zones.map((zone) => ({ id: zone.id, scene }));
+  }
+  return zones.map((zone) => ({ id: zone.id, scene: decideScene({ ...input, following: zone.following }) }));
+}
+
+/**
+ * The wall's scene key: the keys of the scenes it is given, joined. Callers pass the drawn zones' (zones.ts
+ * `drawnZones`), so a yield holds until what the wall draws changes: a change in any drawn zone takes the wall back,
+ * and one in a zone with no panels doesn't. With one zone it is that zone's key.
+ */
+export function wallSceneKey(scenes: readonly ZoneScene[]): string {
+  return scenes.map((zone) => zone.scene.key).join("|");
+}
+
+/**
+ * The scene the published `output` speaks for (its `activityId` and `fraction`): the zone showing the newest running
+ * session, else a zone showing the pin, else the first zone's (another plugin's effect, or nothing). With one zone it
+ * is that zone's scene.
+ */
+export function outputScene(scenes: readonly ZoneScene[], sessions: readonly SessionLike[]): Scene {
+  let newest: { scene: Scene; at: number } | null = null;
+  for (const { scene } of scenes) {
+    if (scene.kind !== "live") continue;
+    const session = sessions.find((s) => `live:${s.id}` === scene.key);
+    const at = session ? session.startedAt.getTime() : Number.NEGATIVE_INFINITY;
+    if (!newest || at > newest.at) newest = { scene, at };
+  }
+  if (newest) return newest.scene;
+  return scenes.find((zone) => zone.scene.kind === "pinned")?.scene ?? scenes[0]?.scene ?? OFF_SCENE;
+}
+
 /* ---- Copy for the interface ---- */
 
 /**

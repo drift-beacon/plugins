@@ -3,7 +3,7 @@
  * whether a gesture it heard did something, and to what.
  */
 import { pinnedFor, shownLive } from "./scene.ts";
-import type { ActivityLike, GestureAction, SessionLike, TouchGesture } from "./types.ts";
+import type { ActivityLike, GestureAction, ResolvedZone, SessionLike, TouchGesture } from "./types.ts";
 
 /** Every gesture, in the order Controls lists them. */
 export const GESTURES: readonly TouchGesture[] = Object.freeze([
@@ -86,4 +86,29 @@ export function resolveGesture(
         following.every((id) => s.currentMemberIds.includes(id)),
     );
   return together ? null : { kind: "track", activityId: activity.id, members: following };
+}
+
+/**
+ * The zone a touch acts in. `panelId` is the panel touched (a tap or double tap), the panel a swipe was placed on
+ * (touch.ts `swipePanel`), or null when nothing places it.
+ *
+ * - A touch on a panel acts in that panel's zone.
+ * - On a wall that isn't split (one zone has panels, or none has) a touch nothing places, or one on an id that is no
+ *   light panel of the wall, acts in that zone as every touch did before zones: the zone with panels, else the first.
+ * - On a split wall such a touch acts nowhere (null), so a swipe the touch stream didn't place does nothing.
+ *
+ * Taps and swipes follow the same rule: the controller names a tap's panel, and the touch stream a swipe's.
+ */
+export function touchZone<Z extends Pick<ResolvedZone, "panels">>(zones: readonly Z[], panelId: number | null): Z | null {
+  if (panelId !== null) {
+    const touched = zones.find((zone) => zone.panels.includes(panelId));
+    if (touched) return touched;
+  }
+  let drawn: Z | null = null;
+  for (const zone of zones) {
+    if (zone.panels.length === 0) continue;
+    if (drawn) return null;
+    drawn = zone;
+  }
+  return drawn ?? zones[0] ?? null;
 }

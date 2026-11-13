@@ -333,21 +333,27 @@ test("storage values survive a JSON round trip unchanged", () => {
   assert.equal(sameLayout(readLayout(JSON.parse(JSON.stringify(layout))), layout), true);
 });
 
-test("readZones keeps the first zone's id and its one member; anything else is no zones", () => {
+test("readZones reads every zone in stored order: its id (\"wall\" for the first without one) and its one member", () => {
   assert.deepEqual(readZones([{ id: "wall", member: " sam " }]), [{ id: "wall", member: "sam" }]);
   assert.deepEqual(readZones([{ id: "z1", member: "sam" }, { id: "z2", member: "alex" }]), [
     { id: "z1", member: "sam" },
+    { id: "z2", member: "alex" },
   ]);
   assert.deepEqual(readZones([{ member: "sam" }]), [{ id: WALL_ZONE_ID, member: "sam" }], "no id");
   for (const member of [undefined, null, "", 3, ["sam"]]) {
     assert.deepEqual(readZones([{ id: "wall", member }]), [{ id: "wall", member: null }]);
   }
   for (const bad of GARBAGE) assert.deepEqual(readZones(bad), []);
-  assert.deepEqual(readZones([null, { id: "wall", member: "sam" }]), []);
+  // An entry that isn't an object is left out; the rest are read.
+  assert.deepEqual(readZones([null, { id: "wall", member: "sam" }]), [{ id: "wall", member: "sam" }]);
 });
 
-test("the picker writes one zone with the member picked, keeping the zone's id", () => {
+test("the picker writes one zone with the member picked, keeping the zone's id; a split list stays as it is", () => {
   assert.deepEqual(zonesFollowing(undefined, "sam"), [{ id: WALL_ZONE_ID, member: "sam" }]);
   assert.deepEqual(zonesFollowing([{ id: "z1", member: "sam" }], "alex"), [{ id: "z1", member: "alex" }]);
-  assert.deepEqual(zonesFollowing([{ id: "z1", member: "sam" }, { id: "z2" }], "alex"), [{ id: "z1", member: "alex" }]);
+  // Without the roster it can't tell which zones stand, so a stored split list comes back as read.
+  assert.deepEqual(zonesFollowing([{ id: "z1", member: "sam" }, { id: "z2" }], "alex"), [
+    { id: "z1", member: "sam" },
+    { id: "z2", member: null },
+  ]);
 });

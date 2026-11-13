@@ -81,7 +81,7 @@ export interface PlacedLayout {
  *   layout: Layout | null                  written by main whenever the controller reports a different layout
  *   order: PanelOrder                      written by the UI
  *   settings: Settings                     written by the UI
- *   zones: Zone[]                          written by the UI (who the wall follows)
+ *   zones: Zone[]                          written by the UI (the wall's zones and who each follows)
  *   handback: Handback | null              written by main while it drives the wall
  * Read them through shared/storage.ts, which validates and fills defaults: values can come from another version.
  */
@@ -95,14 +95,36 @@ export const STORAGE_KEYS = {
 } as const;
 
 /**
- * Who a part of the wall follows (storage `zones`). There is one zone, the whole wall, kept in a list of its own so a
- * write to it never races a settings edit. `id` is made once and never changes. `member` is the one person chosen,
- * null when nobody is; who the zone acts for is worked out from it each time (acting-for.ts), and that is never
- * written back.
+ * A group of panels on the wall that belongs to one member (storage `zones`, a list kept apart from the settings so a
+ * write to it never races a settings edit). A wall that was never split is one zone, the whole wall. `id` is made once
+ * and never changes. `member` is the one person chosen, null when nobody is; who the zone acts for is worked out from
+ * it each time (zones.ts `resolveZones`, acting-for.ts), and that is never written back. `panels` lists the panel ids
+ * given to it (a panel listed nowhere belongs to the first zone, so today's single entry has none); `order` is how it
+ * fills, the wall's stored order when absent. Both keys are left out, never undefined, when there is nothing to say.
  */
 export interface Zone {
   readonly id: string;
   readonly member: string | null;
+  readonly panels?: readonly number[];
+  readonly order?: PanelOrder;
+}
+
+/**
+ * A zone as it stands on this wall now (zones.ts `resolveZones`), worked out from storage, the roster and the layout,
+ * and never written back.
+ */
+export interface ResolvedZone {
+  readonly id: string;
+  /** Who it acts for: its stored member, or the owner for a lone zone whose member has left; null with no roster. */
+  readonly member: string | null;
+  /** `member` as the rules take it (`decideScene`, `resolveGesture`, `speaksTo`): a list of one, empty for null. */
+  readonly following: readonly string[];
+  /** Its light panels, ascending by id. Empty for a zone kept with nothing on it (not drawn). */
+  readonly panels: readonly number[];
+  /** How it fills: its own stored order, else the wall's (storage `order`). */
+  readonly order: PanelOrder;
+  /** Its index in the stored list (0 for the wall made up when none remains): what picks its tag colour. */
+  readonly position: number;
 }
 
 /**

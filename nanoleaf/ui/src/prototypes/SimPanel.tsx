@@ -15,17 +15,29 @@ interface SimButton {
 const APP: readonly SimButton[] = [
   {
     key: "S",
-    label: "Start",
-    title: "Start a session on an activity with a goal",
+    label: "Rich",
+    title: "Rich starts a session on an activity with a goal (it moves him out of the one he was in)",
     action: { type: "start", goal: true },
   },
   {
     key: "G",
     label: "No goal",
-    title: "Start a session on an activity without a goal",
+    title: "Rich starts a session on an activity without a goal",
     action: { type: "start", goal: false },
   },
-  { key: "E", label: "End", title: "End the live session", action: { type: "end" } },
+  {
+    key: "J",
+    label: "Sam",
+    title: "Sam starts a session of their own (again: Sam leaves it)",
+    action: { type: "member", who: "sam" },
+  },
+  {
+    key: "K",
+    label: "Rich + Sam",
+    title: "Rich and Sam start a session together (again: it ends)",
+    action: { type: "member", who: "both" },
+  },
+  { key: "E", label: "End", title: "End every live session", action: { type: "end" } },
   { key: "P", label: "Pin", title: "Pin or unpin an activity", action: { type: "pin" } },
   {
     key: "X",
@@ -57,7 +69,30 @@ const WALL: readonly SimButton[] = [
     title: "Magic Cube takes the wall: picked up, shaken, landed, let go (press again for the next step)",
     action: { type: "control" },
   },
-  { key: "W", label: "Touch", title: "Tap a random panel on the wall", action: { type: "tap" } },
+  {
+    key: "W",
+    label: "Tap",
+    title: "Tap a random panel on the wall: it acts in that panel's zone, as the gesture is set",
+    action: { type: "tap" },
+  },
+  {
+    key: "Q",
+    label: "Double tap",
+    title: "Double tap a random panel: pause or resume in that panel's zone (a pause ends the session here)",
+    action: { type: "tap", gesture: "double-tap" },
+  },
+  {
+    key: "V",
+    label: "Swipe",
+    title: "Swipe down from a random panel: placed in its zone only while the touch stream is heard",
+    action: { type: "tap", gesture: "swipe-down" },
+  },
+  {
+    key: "H",
+    label: "Touch stream",
+    title: "The wall's touch stream is heard (again: silent): on a split wall swipes need it",
+    action: { type: "touch-stream" },
+  },
   { key: "B", label: "Busy", title: "Another workspace's instance holds the controller", action: { type: "busy" } },
   { key: "M", label: "Main", title: "Main stops running (again to restart)", action: { type: "main" } },
   {
@@ -75,7 +110,7 @@ const WALL: readonly SimButton[] = [
   {
     key: "N",
     label: "One member",
-    title: "The workspace has only its owner (again for three members): the wall follows them, with no picker",
+    title: "The workspace has only its owner (again for three members): no picker and no zones",
     action: { type: "one-member" },
   },
 ];
@@ -163,5 +198,7 @@ function describe(r: SimReadout): string {
   if (r.activity) parts.push(r.activity);
   if (r.fraction !== null) parts.push(`${progressPercent(r.fraction)}%`);
   if (r.speed > 1) parts.push(`×${r.speed}`);
+  if (r.zones > 1) parts.push(`${r.zones} zones`);
+  parts.push(r.touchStream ? "stream heard" : "stream silent");
   return parts.join(" · ");
 }

@@ -89,6 +89,18 @@ const WAVE_TAIL = 0.02;
 export interface RenderOptions {
   readonly reducedMotion?: boolean;
   readonly spans?: readonly FillSpan[] | null;
+  /**
+   * Where this order sits in a longer one (a zone's order in the wall's, zones.ts `combinedOrder`): position k is
+   * `offset + k` of `length` there. Only another plugin's effect reads it, since it runs along the whole wall. Without
+   * it, the order is the whole of it.
+   */
+  readonly along?: OrderSpan | null;
+}
+
+/** A stretch of a longer order: it starts at position `offset` of `length`. */
+export interface OrderSpan {
+  readonly offset: number;
+  readonly length: number;
 }
 
 const WHITE: Rgb = [255, 255, 255];
@@ -504,9 +516,18 @@ interface Prepared {
   readonly spread: number;
   /** A controller's effect on its own clock (mode `CONTROL`): it gives each panel its colour as well as its level. */
   readonly effect: PreparedEffect | null;
+  /** Added to a position to find it in the order the effect runs along (`RenderOptions.along`). */
+  readonly effectOffset: number;
 }
 
-function prepare(scene: Scene, n: number, t: number, reduced: boolean, spans: readonly FillSpan[] | null): Prepared {
+function prepare(
+  scene: Scene,
+  n: number,
+  t: number,
+  reduced: boolean,
+  spans: readonly FillSpan[] | null,
+  along: OrderSpan | null = null,
+): Prepared {
   const progress = scene.progress;
   const mode =
     scene.kind === "control"
@@ -539,14 +560,15 @@ function prepare(scene: Scene, n: number, t: number, reduced: boolean, spans: re
     edge: breathing ? EDGE_BOOST * (0.5 - 0.5 * Math.cos((TAU * t) / EDGE_MS)) : 0,
     phase: t / PULSE_MS,
     spread: PULSE_SPREAD / Math.max(n - 1, 1),
-    effect: scene.kind === "control" ? prepareEffect(scene.effect, n, t, reduced) : null,
+    effect: scene.kind === "control" ? prepareEffect(scene.effect, along ? along.length : n, t, reduced) : null,
+    effectOffset: along ? along.offset : 0,
   };
 }
 
 /** The scene's own colour and level at position `k`, written into `out`. */
 function lightAt(p: Prepared, k: number, out: Slot): void {
   if (p.effect) {
-    const light = effectLight(p.effect, k);
+    const light = effectLight(p.effect, k + p.effectOffset);
     out.rgb = light.rgb;
     out.level = light.level;
   } else {
@@ -588,8 +610,8 @@ function onEdge(p: Prepared, k: number): boolean {
 
 /** The scene's own light for position `k` (0-based) of `n` at time `t`, before crossfades, moments and previews. */
 export function sceneLight(scene: Scene, k: number, n: number, t: number, opts?: RenderOptions): PanelLight {
-  const p = prepare(scene, n, t, opts?.reducedMotion === true, opts?.spans ?? null);
-  return p.effect ? effectLight(p.effect, k) : { rgb: p.rgb, level: levelAt(p, k) };
+  const p = prepare(scene, n, t, opts?.reducedMotion === true, opts?.spans ?? null, opts?.along ?? null);
+  return p.effect ? effectLight(p.effect, k + p.effectOffset) : { rgb: p.rgb, level: levelAt(p, k) };
 }
 
 /** The 0-based position of the panel that is filling (the one that breathes), or null when none is part-way. */
@@ -670,6 +692,7 @@ function sceneLayer(
   reduced: boolean,
   depth: number,
   spans: readonly FillSpan[] | null,
+  along: OrderSpan | null,
 ): SceneLayer {
   const adjust = state.adjust === true;
   const full = adjust ? ADJUST_FADE_MS : FADE_MS;
@@ -679,11 +702,11 @@ function sceneLayer(
   let from: SceneLayer | null = null;
   let prev: Prepared | null = null;
   if (state.previous && since < fadeMs + (stagger === 0 ? 0 : Math.min((n - 1) * stagger, STAGGER_MAX_MS))) {
-    if (state.from && depth < MAX_DEPTH) from = sceneLayer(state.from, n, t, reduced, depth + 1, spans);
-    else prev = prepare(state.previous, n, t, reduced, spans);
+    if (state.from && depth < MAX_DEPTH) from = sceneLayer(state.from, n, t, reduced, depth + 1, spans, along);
+    else prev = prepare(state.previous, n, t, reduced, spans, along);
   }
   return {
-    cur: prepare(state.scene, n, t, reduced, spans),
+    cur: prepare(state.scene, n, t, reduced, spans, along),
     waves: reduced ? null : wavesAt(state.moments, n, t),
     from,
     prev,
@@ -875,7 +898,7 @@ export function renderFrame(
   if (n === 0) return out;
   const reduced = opts?.reducedMotion === true;
   const spans = opts?.spans && opts.spans.length === n ? opts.spans : null;
-  const scene = sceneLayer(state, n, t, reduced, 0, spans);
+  const scene = sceneLayer(state, n, t, reduced, 0, spans, opts?.along ?? null);
   const fadeAt = state.previewFadeAt ?? state.previewAt;
   const below = state.previewFrom ?? null;
   const showing = state.preview !== null || (below !== null && t - fadeAt < PREVIEW_FADE_MS);

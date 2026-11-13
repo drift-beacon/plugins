@@ -1,14 +1,18 @@
 import { cn } from "@heroui/theme";
 import { useAnimate, useReducedMotion } from "motion/react";
-import { useEffect, useRef, useState } from "react";
-import { GESTURES, resolveGesture } from "../../../../shared/gestures.ts";
+import { Fragment, useEffect, useRef, useState } from "react";
+import { GESTURES } from "../../../../shared/gestures.ts";
+import { isSplit } from "../../../../shared/zones.ts";
 import type { GestureAction, TouchGesture } from "../../../../shared/types.ts";
 import { useDrafting } from "../../hooks/useDrawnLight.ts";
-import { followingOf, type NanoleafModel, useModel } from "../../model.ts";
+import { showsZones, wallZones } from "../../lib/zones.ts";
+import { type NanoleafModel, useModel } from "../../model.ts";
 import { EASE_OUT } from "../../motion.ts";
 import { SwitchRow } from "../SwitchRow.tsx";
 import { ActionPicker } from "./ActionPicker.tsx";
 import { GestureGlyph } from "./GestureGlyph.tsx";
+import { type Heard, tileFollowing, tileStep } from "./tileJudge.ts";
+import { splitWallLines } from "./zoneLines.ts";
 
 /** How long a refused save stays on screen, as in SettingsPanel. */
 const SAVE_ERROR_MS = 6000;
@@ -33,11 +37,11 @@ const SWIPE: Partial<Record<TouchGesture, readonly [number, number]>> = {
 /**
  * A gesture's tile, which answers when the wall reports that gesture: a tap presses it, a double tap presses it twice,
  * a swipe slides its glyph through the way the finger went. A glow under it says what the gesture did, judged as main
- * judges it (shared/gestures.ts): the colour of the activity it acted on, or a neutral flash when it did nothing. With
+ * judges it (shared/gestures.ts; on a split wall in the zone main says it acted in, `onGestureZone`): the colour of the activity it acted on, or a neutral flash when it did nothing. With
  * reduced motion only the glow plays. Quiet while gestures are off, and while tap to order takes the taps.
  */
 function GestureTile({ gesture, model }: { gesture: TouchGesture; model: NanoleafModel }) {
-  const { onTouch } = model;
+  const { onTouch, onGestureZone } = model;
   const reduced = useReducedMotion();
   const drafting = useDrafting();
   const [scope, animate] = useAnimate<HTMLSpanElement>();
@@ -45,42 +49,51 @@ function GestureTile({ gesture, model }: { gesture: TouchGesture; model: Nanolea
   const latest = useRef({ model, drafting });
   latest.current = { model, drafting };
 
-  useEffect(
-    () =>
-      onTouch((_panel, heard) => {
-        const { model: m, drafting: busy } = latest.current;
-        if (heard !== gesture || busy || !m.settings.gestures) return;
-        const glow = scope.current?.querySelector<HTMLElement>("[data-glow]");
-        const glyph = scope.current?.querySelector<HTMLElement>("[data-glyph]");
-        if (!scope.current || !glow || !glyph) return;
-        const resolved = resolveGesture(m.settings.gestureActions[gesture], m.activities, m.sessions, followingOf(m));
-        // Main starts nothing for nobody (no roster), so that does nothing here either.
-        const step = resolved?.kind === "track" && resolved.members.length === 0 ? null : resolved;
-        const activity = step ? m.activities.find((a) => a.id === step.activityId) : undefined;
-        glow.style.background = step
-          ? (activity?.color ?? "hsl(var(--heroui-primary))")
-          : "hsl(var(--heroui-default-400) / 0.35)";
-        animate(glow, { opacity: [0, 0.45, 0] }, { duration: 0.6, ease: EASE_OUT });
-        if (reduced) return;
-        const away = SWIPE[gesture];
-        if (away) {
-          const [x, y] = away;
-          animate(
-            glyph,
-            { x: [0, x, -x, 0], y: [0, y, -y, 0], opacity: [1, 0, 0, 1] },
-            { duration: 0.34, times: [0, 0.4, 0.41, 1], ease: EASE_OUT },
-          );
-        } else {
-          const twice = gesture === "double-tap";
-          animate(
-            scope.current,
-            { scale: twice ? [1, 0.86, 1, 0.86, 1] : [1, 0.86, 1] },
-            { duration: twice ? 0.42 : 0.24, ease: EASE_OUT },
-          );
-        }
-      }),
-    [onTouch, gesture, reduced, animate, scope],
-  );
+  useEffect(() => {
+    const play = (report: Heard) => {
+      const { model: m, drafting: busy } = latest.current;
+      if (busy || !m.settings.gestures) return;
+      const glow = scope.current?.querySelector<HTMLElement>("[data-glow]");
+      const glyph = scope.current?.querySelector<HTMLElement>("[data-glyph]");
+      if (!scope.current || !glow || !glyph) return;
+      // An unsplit wall judges by the touch, for the member it follows; a split wall by the zone main acted in.
+      const following = tileFollowing(m, report);
+      if (following === undefined) return;
+      const step = tileStep(m, gesture, following);
+      const activity = step ? m.activities.find((a) => a.id === step.activityId) : undefined;
+      glow.style.background = step
+        ? (activity?.color ?? "hsl(var(--heroui-primary))")
+        : "hsl(var(--heroui-default-400) / 0.35)";
+      animate(glow, { opacity: [0, 0.45, 0] }, { duration: 0.6, ease: EASE_OUT });
+      if (reduced) return;
+      const away = SWIPE[gesture];
+      if (away) {
+        const [x, y] = away;
+        animate(
+          glyph,
+          { x: [0, x, -x, 0], y: [0, y, -y, 0], opacity: [1, 0, 0, 1] },
+          { duration: 0.34, times: [0, 0.4, 0.41, 1], ease: EASE_OUT },
+        );
+      } else {
+        const twice = gesture === "double-tap";
+        animate(
+          scope.current,
+          { scale: twice ? [1, 0.86, 1, 0.86, 1] : [1, 0.86, 1] },
+          { duration: twice ? 0.42 : 0.24, ease: EASE_OUT },
+        );
+      }
+    };
+    const stopTouch = onTouch((panel, heard) => {
+      if (heard === gesture) play({ via: "touch", panel });
+    });
+    const stopZone = onGestureZone((heard, zoneId) => {
+      if (heard === gesture) play({ via: "zone", zoneId });
+    });
+    return () => {
+      stopTouch();
+      stopZone();
+    };
+  }, [onTouch, onGestureZone, gesture, reduced, animate, scope]);
 
   return (
     <span
@@ -117,6 +130,8 @@ export function ControlsCard() {
       },
     );
   const silent = connection?.status === "connected" && !connection.events;
+  const standing = wallZones(model);
+  const lines = splitWallLines(showsZones(standing), isSplit(standing), model.touchStreamHeard);
   return (
     <section aria-label="Controls" className="rounded-2xl bg-content1 ring-1 ring-default-100">
       <div className="space-y-2 p-4">
@@ -129,6 +144,7 @@ export function ControlsCard() {
         {silent && settings.gestures && (
           <p className="text-warning text-xs">Your wall isn't reporting touches right now.</p>
         )}
+        {lines.touch && <p className="text-default-500 text-xs">{lines.touch}</p>}
         <p role="status" className="text-danger text-xs empty:hidden">
           {saveError}
         </p>
@@ -141,23 +157,34 @@ export function ControlsCard() {
         )}
       >
         {GESTURES.map((gesture) => (
-          <div key={gesture} className="flex items-center gap-3 px-4 py-2.5">
-            <GestureTile gesture={gesture} model={model} />
-            <span className="min-w-0 flex-1 font-medium text-sm">{LABEL[gesture]}</span>
-            <div className="w-[52%] max-w-[240px] shrink-0">
-              <ActionPicker
-                label={LABEL[gesture]}
-                value={settings.gestureActions[gesture]}
-                activities={activities}
-                onChange={(action) => {
-                  const next: Record<string, GestureAction> = { ...settings.gestureActions };
-                  if (action) next[gesture] = action;
-                  else delete next[gesture];
-                  save({ gestureActions: next });
-                }}
-              />
+          <Fragment key={gesture}>
+            {/* By the swipe rows: what a swipe does on a split wall. */}
+            {gesture === "swipe-up" && lines.swipe && (
+              <p className="px-4 pt-2.5 pb-1 text-default-500 text-xs">{lines.swipe}</p>
+            )}
+            <div
+              className={cn(
+                "flex items-center gap-3 px-4 py-2.5 transition-opacity duration-200 ease-out",
+                lines.swipesDimmed && gesture.startsWith("swipe") && "opacity-45",
+              )}
+            >
+              <GestureTile gesture={gesture} model={model} />
+              <span className="min-w-0 flex-1 font-medium text-sm">{LABEL[gesture]}</span>
+              <div className="w-[52%] max-w-[240px] shrink-0">
+                <ActionPicker
+                  label={LABEL[gesture]}
+                  value={settings.gestureActions[gesture]}
+                  activities={activities}
+                  onChange={(action) => {
+                    const next: Record<string, GestureAction> = { ...settings.gestureActions };
+                    if (action) next[gesture] = action;
+                    else delete next[gesture];
+                    save({ gestureActions: next });
+                  }}
+                />
+              </div>
             </div>
-          </div>
+          </Fragment>
         ))}
       </div>
     </section>

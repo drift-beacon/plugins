@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from "motion/react";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import { useSwapMotion } from "../../hooks/useSwapMotion.ts";
 import { ControlsCard } from "../controls/Controls.tsx";
 import { SettingsCards } from "../SettingsPanel.tsx";
@@ -22,6 +22,18 @@ export function PhoneTabs({ cap, notices, setup }: { cap: number; notices: React
     setTab(next);
     window.scrollTo({ top: 0 });
   };
+  // Choosing panels needs the full drawing: the Order tab comes forward for it, and Done goes back to where it began.
+  const back = useRef<TabId | null>(null);
+  const onChoosing = (zoneId: string | null) => {
+    if (zoneId !== null) {
+      back.current ??= tab === "order" ? null : tab;
+      if (tab !== "order") go("order");
+      return;
+    }
+    const to = back.current;
+    back.current = null;
+    setTab((current) => (to !== null && current === "order" ? to : current));
+  };
   return (
     <>
       {/* The sky and the horizon reach past the content's edges: clipped here, so the page never pans sideways. */}
@@ -41,6 +53,7 @@ export function PhoneTabs({ cap, notices, setup }: { cap: number; notices: React
                 // Leaving the Order tab cancels a draft in progress: it holds the wall, and nothing would show it.
                 shown={tab === "order"}
                 sky
+                onChoosing={onChoosing}
                 arrange={(parts) => (
                   <div className="space-y-3">
                     {/* The full drawing is the Order tab's; kept mounted on the others, so zoom survives a trip to
@@ -52,7 +65,7 @@ export function PhoneTabs({ cap, notices, setup }: { cap: number; notices: React
                       </div>
                       <div className="relative">{parts.stage}</div>
                     </div>
-                    {tab === "wall" && <WallTab onOpenWall={() => go("order")} />}
+                    {tab === "wall" && <WallTab onOpenWall={() => go("order")} split={parts.split} />}
                     {tab === "order" && parts.editor}
                     {tab === "controls" && <ControlsCard />}
                     {tab === "settings" && (

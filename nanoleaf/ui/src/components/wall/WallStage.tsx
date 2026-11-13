@@ -2,16 +2,18 @@ import { cn } from "@heroui/theme";
 import { ZoomIn, ZoomOut } from "lucide-react";
 import { AnimatePresence, animate, motion, useReducedMotion } from "motion/react";
 import { type ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { FillSpan, PlacedLayout, Rgb } from "../../../../shared/types.ts";
+import { cssRgb } from "../../../../shared/color.ts";
+import type { PlacedLayout, Rgb } from "../../../../shared/types.ts";
+import type { LightSourceRef } from "../../hooks/useLights.ts";
 import { useMediaQuery } from "../../hooks/useMediaQuery.ts";
-import type { RenderStateRef } from "../../hooks/useRenderState.ts";
 import { withAlpha } from "../../lib/color.ts";
 import { EASE_IN_OUT, EASE_OUT } from "../../motion.ts";
 import { type NumbersLevel, StageBadges } from "./StageBadges.tsx";
-import { type PanelFlash, StageCanvas } from "./StageCanvas.tsx";
+import { type ChoosingMarks, type PanelFlash, type PanelPresses, StageCanvas } from "./StageCanvas.tsx";
 import { Horizon } from "./Horizon.tsx";
 import { StageToast, type ToastMessage } from "./StageToast.tsx";
 import { layoutStage, type Stage, steadyHeight, zoomFor } from "./stageLayout.ts";
+import { choosingLabel, placeTags, type ZoneTag, zoneOutline } from "./zoneMarks.ts";
 
 /** The stage's own surface: the theme's surface, kept dark in a light theme (`.wall-stage` in wall.css). */
 export const STAGE_BG = "var(--db-surface)";
@@ -27,11 +29,8 @@ interface WallStageProps {
   readonly turns?: readonly PlacedLayout[];
   /** The saved view rotation: a change turns the drawing. */
   readonly rotation: number;
-  readonly stateRef: RenderStateRef;
-  /** The resolved order the lights follow. */
-  readonly order: readonly number[];
-  /** Each panel's share of a goal when the order fills as a line (null one panel at a time). */
-  readonly spans?: readonly FillSpan[] | null;
+  /** What the light loop draws: every zone's render state over its own fill. */
+  readonly lights: LightSourceRef;
   /** The order the numbers show (differs while a list row is being dragged). */
   readonly numberOrder: readonly number[];
   readonly drafting: boolean;
@@ -61,6 +60,15 @@ interface WallStageProps {
   readonly cap?: number;
   /** Icon buttons that join the zoom button in one group on the drawing (`toolClass` styles them). */
   readonly tools?: ReactNode;
+  /** Choosing panels for a zone: its name, tag colour and panels (the drawing marks them and takes presses). */
+  readonly choosing?: { readonly name: string; readonly rgb: Rgb; readonly panels: readonly number[] } | null;
+  readonly presses?: PanelPresses;
+  /** Tap to order on a split wall: the zone's panels, the only ones that take numbers. */
+  readonly draftable?: readonly number[] | null;
+  /** Each zone's name tag on the drawing (null or fewer than two: none). */
+  readonly tags?: readonly ZoneTag[] | null;
+  /** Above the drawing, over the sky (choosing panels' banner). */
+  readonly banner?: ReactNode;
   onToastDone(): void;
   onHover(id: number | null): void;
   onActivate(id: number): void;
@@ -75,6 +83,8 @@ interface WallStageProps {
  */
 export function WallStage(props: WallStageProps) {
   const { placed, rotation, drafting } = props;
+  // Tap to order and choosing panels both want finger-sized panels.
+  const editing = drafting || !!props.choosing;
   const reduced = useReducedMotion();
   const area = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
@@ -107,21 +117,30 @@ export function WallStage(props: WallStageProps) {
 
   // Tap to order on a touch screen needs finger-sized panels: zoom in for it when they're small, and back out after
   // (unless the user had zoomed in already).
-  const auto = useRef({ zoomed: false, want: false, on: false });
+  const auto = useRef({ zoomed: false, on: false, pending: false });
+  const want = coarse && zoom > 1;
   useLayoutEffect(() => {
-    auto.current.want = coarse && zoom > 1;
     auto.current.on = zoomOn;
   });
+  // Only when editing starts or ends, as before: a resize meanwhile never zooms back in after the person zoomed out.
   useEffect(() => {
     const a = auto.current;
-    if (drafting && a.want && !a.on) {
-      a.zoomed = true;
-      setZoomOn(true);
-    } else if (!drafting && a.zoomed) {
+    a.pending = editing;
+    if (!editing && a.zoomed) {
       a.zoomed = false;
       setZoomOn(false);
     }
-  }, [drafting]);
+  }, [editing]);
+  // Started on another tab (the phone), the drawing has no size yet: it zooms in once it has one, still only once.
+  useEffect(() => {
+    const a = auto.current;
+    if (!a.pending || !want) return;
+    a.pending = false;
+    if (!a.on) {
+      a.zoomed = true;
+      setZoomOn(true);
+    }
+  }, [editing, want]);
 
   // A new zoom starts centred on the wall.
   useLayoutEffect(() => {
@@ -172,6 +191,27 @@ export function WallStage(props: WallStageProps) {
       </button>
     ) : null;
 
+  const choosingFor = props.choosing ?? null;
+  const marks = useMemo<ChoosingMarks | null>(() => {
+    if (!choosingFor || !stage) return null;
+    const mine = new Set(choosingFor.panels);
+    return {
+      name: choosingFor.name,
+      label: choosingLabel(choosingFor.name, z > 1, coarse),
+      rgb: choosingFor.rgb,
+      panels: mine,
+      outline: zoneOutline(
+        placed.panels.filter((panel) => mine.has(panel.id)),
+        stage,
+      ),
+    };
+  }, [choosingFor, stage, placed, z, coarse]);
+  const draftable = useMemo(() => (props.draftable ? new Set(props.draftable) : null), [props.draftable]);
+  const tags = useMemo(
+    () => (stage && props.tags && props.tags.length > 1 ? placeTags(props.tags, stage) : []),
+    [stage, props.tags],
+  );
+
   const wash = props.wash && !props.sky
     ? `radial-gradient(90% 70% at 50% 45%, ${withAlpha(props.wash, 0.09)}, transparent 70%)`
     : undefined;
@@ -185,6 +225,7 @@ export function WallStage(props: WallStageProps) {
       style={{ background: props.sky ? undefined : STAGE_BG }}
     >
       {props.header}
+      {props.banner}
       {/* Holding a number to drag it, or a panel on a touch screen, must never select the numbers or call up the
           long-press menu. */}
       <div
@@ -206,9 +247,7 @@ export function WallStage(props: WallStageProps) {
               <div ref={turn} className="absolute inset-0" style={{ transformOrigin: "0 0" }}>
                 <StageCanvas
                   stage={stage}
-                  stateRef={props.stateRef}
-                  order={props.order}
-                  spans={props.spans}
+                  lights={props.lights}
                   drafting={drafting}
                   muted={props.muted}
                   draft={props.draft}
@@ -221,19 +260,38 @@ export function WallStage(props: WallStageProps) {
                   level={props.level}
                   onHover={props.onHover}
                   onActivate={props.onActivate}
+                  choosing={marks}
+                  presses={props.presses}
+                  paintTouch={z === 1}
+                  draftable={draftable}
                 />
-                <StageBadges
-                  stage={stage}
-                  order={props.numberOrder}
-                  drafting={drafting}
-                  draft={props.draft}
-                  numbers={props.numbers}
-                  focusId={props.focusId}
-                  accent={props.accent}
-                  onActivate={props.onActivate}
-                  onTarget={setTarget}
-                  onSwap={props.onSwap}
-                />
+                {/* Numbers stay out of the way while choosing panels: presses go to the panels. */}
+                {!choosingFor && (
+                  <StageBadges
+                    stage={stage}
+                    order={props.numberOrder}
+                    drafting={drafting}
+                    draft={props.draft}
+                    numbers={props.numbers}
+                    focusId={props.focusId}
+                    accent={props.accent}
+                    onActivate={props.onActivate}
+                    onTarget={setTarget}
+                    onSwap={props.onSwap}
+                  />
+                )}
+                {/* Each zone's name, on its panels: inside the turn and zoom, so it moves with them. */}
+                {tags.map((tag) => (
+                  <span
+                    key={tag.id}
+                    aria-hidden
+                    className="pointer-events-none absolute flex max-w-[160px] items-center gap-1.5 whitespace-nowrap rounded-full bg-background/70 py-0.5 pr-2 pl-1.5 font-medium text-[11px] text-foreground backdrop-blur-sm"
+                    style={{ left: tag.at[0], top: tag.at[1], transform: "translate(-50%, -50%)" }}
+                  >
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: cssRgb(tag.rgb) }} />
+                    <span className="truncate">{tag.name}</span>
+                  </span>
+                ))}
               </div>
             </div>
           </div>

@@ -8,6 +8,7 @@ import { effectName, EventStream, stateAttrs, touches } from "../main/src/nanole
 import { NanoleafClient } from "../main/src/nanoleaf/http.ts";
 import { ExtControlStream } from "../main/src/nanoleaf/stream.ts";
 import { encodeExtControlV2, parseAnimData } from "../shared/protocol.ts";
+import { decodeTouchPacket, readTouchByte, TOUCH_DOWN, TOUCH_SWIPE, TOUCH_UP } from "../shared/touch.ts";
 import { LAYOUTS, startEmulator } from "../tools/fake-nanoleaf.mjs";
 
 const fixture = (name) => JSON.parse(readFileSync(new URL(`./fixtures/${name}.json`, import.meta.url), "utf8"));
@@ -98,6 +99,38 @@ function stream(port, path) {
     req.on("error", reject);
     req.end();
   });
+}
+
+/** Reads an event stream like `stream`, sending extra request headers. */
+function streamWith(port, path, headers) {
+  return new Promise((resolve, reject) => {
+    const blocks = [];
+    let buffer = "";
+    const req = request({ host: "127.0.0.1", port, path, headers, agent: false }, (res) => {
+      res.setEncoding("utf8");
+      res.on("data", (chunk) => {
+        buffer += chunk;
+        for (let at = buffer.indexOf("\n\n"); at >= 0; at = buffer.indexOf("\n\n")) {
+          const data = /^data: ?(.*)$/m.exec(buffer.slice(0, at))?.[1];
+          buffer = buffer.slice(at + 2);
+          if (data !== undefined) blocks.push(JSON.parse(data));
+        }
+      });
+      resolve({ status: res.statusCode, blocks, close: () => req.destroy() });
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+/** A UDP listener on 127.0.0.1 that decodes touch stream packets, with each one's arrival order. */
+async function touchListener(t) {
+  const socket = createSocket("udp4");
+  const packets = [];
+  socket.on("message", (message) => packets.push(decodeTouchPacket(message)));
+  await new Promise((resolve) => socket.bind(0, "127.0.0.1", resolve));
+  t.after(() => socket.close());
+  return { port: socket.address().port, packets };
 }
 
 /** The device's own events: `{ id, events }` per message. */
@@ -848,4 +881,72 @@ test("main's clients against injected faults: PUT retries, 5xx kinds, event reco
   assert.equal(stream.send([[ids(emu)[0], [9, 9, 9]]]), true);
   await until(() => emu.lostFrames === 1, "the lost frame");
   assert.equal(emu.frames, 0);
+});
+
+test("the UDP touch stream goes to a touch events request with TouchEventsPort, before its SSE event", async (t) => {
+  const emu = await start(t);
+  const token = await pair(emu);
+  const udp = await touchListener(t);
+  const [a, b, c, d] = ids(emu);
+  // The packets sent by the time each SSE touch event is written: proof the UDP went out first, on the emulator's side.
+  const sentAtEvent = [];
+  emu.onChange((change) => change.kind === "touch" && sentAtEvent.push(emu.touchPackets));
+
+  const plain = await streamWith(emu.port, `/api/v1/${token}/events?id=4`, {});
+  t.after(plain.close);
+  const notTouch = await streamWith(emu.port, `/api/v1/${token}/events?id=1,3`, { TouchEventsPort: String(udp.port) });
+  t.after(notTouch.close);
+  emu.touch(a);
+  await until(() => plain.blocks.length === 1, "the tap on the plain stream");
+
+  const asked = await streamWith(emu.port, `/api/v1/${token}/events?id=4`, { TouchEventsPort: String(udp.port) });
+  t.after(asked.close);
+  emu.touch(b);
+  await until(() => asked.blocks.length === 1, "the tap's SSE event");
+  const tap = udp.packets.map((packet) => packet.records);
+  assert.deepEqual(
+    tap.map((records) => records.map(({ panelId, fromId }) => [panelId, fromId])),
+    [[[b, 0xffff]], [[b, 0xffff]]],
+    "a down then an up for the tapped panel only; nothing for the earlier tap or the request without touch",
+  );
+  assert.deepEqual(
+    tap.map(([record]) => readTouchByte(record.raw, "text").type),
+    [TOUCH_DOWN, TOUCH_UP],
+  );
+
+  udp.packets.length = 0;
+  emu.touch(-1, "swipe-left");
+  await until(() => asked.blocks.length === 2, "the swipe without panels");
+  assert.equal(udp.packets.length, 0, "a swipe without panels sends no stream, like a controller without it");
+
+  emu.touch(-1, "swipe-right", { panels: [c, d, a], layout: "text", fill: 0x00ff });
+  emu.touch(d, "double-tap");
+  await until(() => asked.blocks.length === 4, "the swipe and the double tap");
+  assert.deepEqual(asked.blocks.slice(2).map((block) => block.events), [
+    [{ gesture: 5, panelId: -1 }],
+    [{ gesture: 1, panelId: d }],
+  ]);
+  const swipe = udp.packets.slice(0, 4).map(({ records: [record] }) => [
+    record.panelId,
+    readTouchByte(record.raw, "text").type,
+    record.fromId,
+  ]);
+  assert.deepEqual(swipe, [
+    [c, TOUCH_DOWN, 0x00ff],
+    [d, TOUCH_SWIPE, c],
+    [a, TOUCH_SWIPE, c],
+    [a, TOUCH_UP, 0x00ff],
+  ]);
+  assert.equal(udp.packets.length, 8, "then the double tap's two downs and ups");
+  assert.equal(emu.touchPackets, 10);
+  assert.throws(() => emu.touch(-1, "swipe-up", { panels: [-3] }), RangeError);
+
+  await until(() => plain.blocks.length === 5, "the plain stream to catch up");
+  asked.close();
+  const before = udp.packets.length;
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  emu.touch(a);
+  await until(() => plain.blocks.length === 6, "the tap after the request closed");
+  assert.equal(udp.packets.length, before, "closing the request ends the stream");
+  assert.deepEqual(sentAtEvent, [0, 2, 2, 6, 10, 10], "each touch's packets were sent before its SSE event");
 });

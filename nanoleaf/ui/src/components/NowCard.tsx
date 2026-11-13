@@ -9,6 +9,7 @@ import type { ActivityLike, ControlScene, Scene } from "../../../shared/types.ts
 import { useNow } from "../hooks/useNow.ts";
 import { useScene } from "../hooks/useScene.ts";
 import { holderName } from "../lib/control.ts";
+import { wallFillOrder } from "../lib/zones.ts";
 import { type NanoleafModel, useModel } from "../model.ts";
 import { EASE_OUT } from "../motion.ts";
 import { pulseWave } from "./bar-light.ts";
@@ -179,7 +180,7 @@ function ActivityNow({ model, scene, activity, away }: ActivityNowProps) {
         )}
       </div>
       {scene.progress ? (
-        <Progress scene={scene} n={n} line={fillsAsLine(model.order)} activity={activity} muted={muted} />
+        <Progress scene={scene} n={n} line={fillsAsLine(wallFillOrder(model))} activity={activity} muted={muted} />
       ) : (
         <div className="mt-4">
           <PanelBar

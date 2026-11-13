@@ -453,3 +453,139 @@ test("a Drift Beacon that sends no members: the wall follows nobody, a start sen
     ["warn", "tap: didn't start Deep work: Drift Beacon sent no workspace members, so nobody can be named"],
   ]);
 });
+
+test("a gesture's target picks who it is for; null acts nowhere; one at a time for the whole wall, waits included", async () => {
+  const work = activity("work");
+  const mine = live("s1", "work", new Date(1000), [ME]);
+  const theirs = live("s2", "work", new Date(2000), [THEM]);
+  const calls = [];
+  const zones = [];
+  const state = { gestures: true, drafting: false };
+  const onGesture = createGestures({
+    following: () => [ME],
+    settings: () => readSettings({ gestures: state.gestures, gestureActions: { tap: PAUSE } }),
+    data: () => ({ activities: [work], sessions: [mine, theirs], members: [] }),
+    drafting: () => state.drafting,
+    actions: { pause: async (id, placedBy) => void calls.push([id, placedBy]) },
+    log: { info() {}, warn() {}, error() {} },
+    onZone: (gesture, zoneId) => zones.push([gesture, zoneId]),
+  });
+  await onGesture("tap", () => ({ id: "z2", following: [THEM] }));
+  await onGesture("tap");
+  await onGesture("tap", () => null);
+  assert.deepEqual(calls, [
+    ["s2", THEM],
+    ["s1", ME],
+  ]);
+  // A target still being worked out (a swipe being placed) holds the wall: a gesture meanwhile is dropped.
+  let place;
+  const waiting = onGesture("tap", () => new Promise((resolve) => (place = resolve)));
+  await onGesture("tap", () => ({ id: "wall", following: [ME] }));
+  place({ id: "z2", following: [THEM] });
+  await waiting;
+  assert.deepEqual(calls.at(-1), ["s2", THEM]);
+  assert.equal(calls.length, 3);
+  // Where each gesture acts, whatever its action does; not for one dropped as busy, nor without a target.
+  await onGesture("double-tap", () => ({ id: "wall", following: [ME] }));
+  state.drafting = true;
+  await onGesture("tap", () => ({ id: "wall", following: [ME] }));
+  state.drafting = false;
+  state.gestures = false;
+  await onGesture("tap", () => ({ id: "wall", following: [ME] }));
+  assert.deepEqual(zones, [
+    ["tap", "z2"],
+    ["tap", null],
+    ["tap", "z2"],
+    ["double-tap", "wall"],
+  ]);
+  assert.equal(calls.length, 3, "double tap has no action here");
+});
+
+test("gestureTarget: taps by panel; a swipe placed by the stream on a split wall, at once on an unsplit one", async () => {
+  const { gestureTarget } = await import("../main/src/index.ts");
+  const splitWall = {
+    zones: [
+      { id: "wall", following: [ME], panels: [1, 2] },
+      { id: "z2", following: [THEM], panels: [3, 4] },
+    ],
+  };
+  const unsplit = { zones: [{ id: "wall", following: [ME], panels: [1, 2, 3, 4] }] };
+  // A stream not heard yet: its packets may still come just after the swipe event, so it is asked all the same.
+  const asked = [];
+  const stream = (panel) => ({
+    lastPacketAt: null,
+    placeSwipe: (ids) => {
+      asked.push(ids);
+      return Promise.resolve(panel);
+    },
+  });
+  assert.deepEqual((await gestureTarget({ gesture: "tap", panelId: 3 }, splitWall, stream(1))()).id, "z2");
+  assert.deepEqual(await gestureTarget({ gesture: "tap", panelId: 9 }, splitWall, null)(), null, "not a panel");
+  assert.deepEqual(asked, [], "a tap names its panel");
+  assert.deepEqual((await gestureTarget({ gesture: "swipe-up", panelId: -1 }, splitWall, stream(4))()).id, "z2");
+  assert.deepEqual(asked, [[1, 2, 3, 4]]);
+  assert.equal(await gestureTarget({ gesture: "swipe-up", panelId: -1 }, splitWall, stream(null))(), null);
+  assert.equal(await gestureTarget({ gesture: "swipe-up", panelId: -1 }, splitWall, null)(), null, "no stream");
+  // Unsplit: the one zone, without waiting for the placement (which still uses the swipe's touch data up).
+  const never = { lastPacketAt: null, placeSwipe: () => new Promise(() => {}) };
+  assert.deepEqual(gestureTarget({ gesture: "swipe-up", panelId: -1 }, unsplit, never)().following, [ME]);
+  assert.deepEqual(gestureTarget({ gesture: "swipe-up", panelId: -1 }, unsplit, null)().following, [ME]);
+});
+
+test("a swipe dropped as busy on a split wall leaves its touch data to the swipe being placed", async () => {
+  const { EventEmitter } = await import("node:events");
+  const { gestureTarget } = await import("../main/src/index.ts");
+  const { TouchStream } = await import("../main/src/nanoleaf/touch-stream.ts");
+  const { encodeTouchPacket, TOUCH_DOWN, TOUCH_SWIPE } = await import("../shared/touch.ts");
+  const socket = new EventEmitter();
+  socket.bind = () => setImmediate(() => socket.emit("listening"));
+  socket.unref = () => {};
+  socket.address = () => ({ port: 50123 });
+  socket.close = () => {};
+  const receive = (records) => socket.emit("message", Buffer.from(encodeTouchPacket(records)), { address: "10.0.0.9" });
+  let t = 10_000;
+  const graces = [];
+  const timers = {
+    setTimeout: (callback) => graces.push(callback) - 1,
+    clearTimeout: (handle) => void (graces[handle] = null),
+  };
+  const stream = new TouchStream({ createSocket: () => socket, now: () => t, timers });
+  await stream.bound;
+  receive([{ panelId: 1, type: TOUCH_DOWN }]); // heard before, long ago
+  t += 5000;
+
+  const director = {
+    zones: [
+      { id: "wall", following: [ME], panels: [1, 2] },
+      { id: "z2", following: [THEM], panels: [3, 4] },
+    ],
+  };
+  const calls = [];
+  const onGesture = createGestures({
+    following: () => [ME],
+    settings: () => readSettings({ gestureActions: { "swipe-down": STOP } }),
+    data: () => ({
+      activities: [activity("work")],
+      sessions: [live("s1", "work", new Date(1000), [ME]), live("s2", "work", new Date(2000), [THEM])],
+      members: [],
+    }),
+    drafting: () => false,
+    actions: { stop: async (id) => void calls.push(id) },
+    log: { info() {}, warn() {}, error() {} },
+  });
+  const swipe = { gesture: "swipe-down", panelId: -1 };
+  // The first swipe's event comes before its touch data: it waits out the grace.
+  const first = onGesture("swipe-down", gestureTarget(swipe, director, stream));
+  t += 30;
+  receive([{ panelId: 3, type: TOUCH_DOWN }]);
+  t += 20;
+  receive([{ panelId: 4, type: TOUCH_SWIPE, fromId: 3 }]);
+  // A second swipe inside that grace is dropped as busy, before it places anything.
+  await onGesture("swipe-down", gestureTarget(swipe, director, stream));
+  assert.equal(graces.length, 1, "only the first swipe is being placed");
+  t += 70;
+  graces[0]();
+  await first;
+  assert.deepEqual(calls, ["s2"], "the first swipe acts in its zone, for their session");
+  stream.close();
+});

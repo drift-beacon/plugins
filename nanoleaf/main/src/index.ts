@@ -1,6 +1,7 @@
 /**
  * Nanoleaf: glows Nanoleaf Shapes in the colour of a live activity and fills them towards its goal. One instance runs
- * per workspace; the wall follows the member chosen in the interface (storage `zones`), else the owner. onStart
+ * per workspace; the wall follows the member chosen in the interface (storage `zones`), else the owner, or is split
+ * into zones that each follow one member (shared/zones.ts). onStart
  * wires the Controller (connection, pairing, layout, events) to the Director (scene → frames, hand-back, yield),
  * answers the interface's requests on the private channel (`ctx.ui`) and handles the declared commands: `resume`, the
  * wall's lock for other plugins and Home Assistant, and the two brightness settings (brightness.ts).
@@ -15,21 +16,32 @@ import {
   PluginError,
   type Session,
 } from "@drift-beacon/plugin";
+import { isIP } from "node:net";
 import { actingFor, speaksTo } from "../../shared/acting-for.ts";
 import { readEffect } from "../../shared/effects.ts";
+import { touchZone } from "../../shared/gestures.ts";
 import { DEFAULT_PORT, readSettings, readZones } from "../../shared/storage.ts";
 import { type ActivityLike, type FoundController, type SessionLike, STORAGE_KEYS } from "../../shared/types.ts";
-import { BRIGHTNESS_INPUT, DISCOVER_INPUT, NUMBERING_INPUT, PAIR_INPUT, PREVIEW_INPUT } from "../../shared/ui-channel.ts";
+import {
+  BRIGHTNESS_INPUT,
+  DISCOVER_INPUT,
+  NUMBERING_INPUT,
+  PAIR_INPUT,
+  PREVIEW_INPUT,
+  type TouchStreamInfo,
+} from "../../shared/ui-channel.ts";
+import { isSplit } from "../../shared/zones.ts";
 import { brightnessState, saveBrightness } from "./brightness.ts";
 import { createOwner } from "./claims.ts";
-import { Controller, type ControllerTimings } from "./controller.ts";
+import { Controller, type ControllerTimings, type EventsHandle } from "./controller.ts";
 import { createDirector, type Director, type DirectorTimings } from "./director.ts";
-import { createGestures, type GestureActions } from "./gestures.ts";
+import { createGestures, type GestureActions, type GestureTarget } from "./gestures.ts";
 import { assertLanHost, type Lookup } from "./lan.ts";
 import { discover } from "./nanoleaf/discovery.ts";
-import { EventStream, type Touch } from "./nanoleaf/events.ts";
+import { EventStream, type EventStreamOptions, type Touch } from "./nanoleaf/events.ts";
 import { isTransient, NanoleafClient, NanoleafError } from "./nanoleaf/http.ts";
 import { ExtControlStream } from "./nanoleaf/stream.ts";
+import { TouchStream, type TouchStreamOptions } from "./nanoleaf/touch-stream.ts";
 import type { WorkspaceData } from "./ports.ts";
 
 /** Knobs for tests and tools (the emulator's UDP port, shorter timings); production uses the defaults. */
@@ -109,15 +121,24 @@ export function startNanoleaf(ctx: MainContext, options: NanoleafPluginOptions =
 
   // Open copies of the interface that are numbering panels (tap to order): their taps on the wall are numbers.
   const numbering = new Set<string>();
-  const following = followingOf(ctx);
   const onGesture = createGestures({
-    following,
+    following: followingOf(ctx),
     settings: () => readSettings(ctx.storage.get(STORAGE_KEYS.settings)),
     data: workspaceData(ctx),
-    drafting: () => director.drafting || numbering.size > 0,
+    // Tap to order and the zone-editing preview take the wall's taps for themselves.
+    drafting: () => director.drafting || director.editingZones || numbering.size > 0,
     actions: gestureActions(ctx),
     log,
+    // Where each gesture acts, for the Controls screen: the `touch` event can't say for a swipe (its panel is -1).
+    onZone: (gesture, zoneId) => {
+      try {
+        ctx.ui.post("gestureZone", { gesture, zoneId });
+      } catch (error) {
+        log.warn("Couldn't tell the interface (gestureZone)", error);
+      }
+    },
   });
+  const touch = touchStreams(ctx);
 
   const wired = new Controller({
     storage: ctx.storage,
@@ -127,22 +148,22 @@ export function startNanoleaf(ctx: MainContext, options: NanoleafPluginOptions =
     checkHost: (host, signal) => assertLanHost(host, { allowLoopback, lookup: options.lookup, signal }),
     probe: (host, port, signal) => NanoleafClient.probe(host, port, { signal }),
     requestToken: (host, port, signal) => NanoleafClient.requestToken(host, port, signal),
-    openEvents: (eventOptions) => new EventStream(eventOptions),
+    openEvents: (eventOptions) => touch.open(eventOptions),
     discover: options.discover ?? ((signal) => find(SEARCH_MS, signal)),
     publish: (info) => ctx.state.set("connection", info),
     onLink: (link) => director.setLink(link),
     onLayout: () => director.update(),
     onDeviceEvent: (event) => director.onDeviceEvent(event),
-    onTouch: (touch) => {
-      emitTouch(ctx, touch);
-      void onGesture(touch.gesture);
+    onTouch: (event) => {
+      emitTouch(ctx, event);
+      void onGesture(event.gesture, gestureTarget(event, director, touch.current()));
     },
     handBack: () => director.handBack(),
     timings: options.controller,
   });
   controller = wired;
 
-  registerRequests(ctx, wired, director, find, numbering);
+  registerRequests(ctx, wired, director, find, numbering, touch.info);
   ctx.commands.handle("resume", () => {
     director.resume();
   });
@@ -163,9 +184,12 @@ export function startNanoleaf(ctx: MainContext, options: NanoleafPluginOptions =
     ctx.state.set("brightness", brightnessState(readSettings(ctx.storage.get(STORAGE_KEYS.settings))));
   // Bound by the brightness controls: published before onStart returns, then on every change of the settings.
   publishBrightness();
-  listen(ctx, director, following, { controller: () => wired.reload(), settings: publishBrightness });
+  // Everyone some zone follows: a schedule that speaks to none of them flashes nothing (the Director picks the zones).
+  const followed = () => director.zones.flatMap((zone) => zone.following);
+  listen(ctx, director, followed, { controller: () => wired.reload(), settings: publishBrightness });
   ctx.onStop(async () => {
     wired.stop();
+    touch.close();
     await director.stop();
   });
 
@@ -173,9 +197,142 @@ export function startNanoleaf(ctx: MainContext, options: NanoleafPluginOptions =
   wired.start();
 }
 
+/** Failed attempts at the events request with `TouchEventsPort`, none opened, before it goes on without it. */
+const TOUCH_HEADER_ATTEMPTS = 2;
+
+/**
+ * One touch stream per controller connection (main/src/nanoleaf/touch-stream.ts), made with the connection's event
+ * stream and closed with it (a drop, a forget, pairing again, a stop), so `heard` starts again at each connection.
+ * The event stream is opened once the touch socket is bound, so its first request already asks for the stream
+ * (`TouchEventsPort`). Its packets are read only from the controller's address when that is an IP address (a host
+ * name can't be compared with a sender), and an IPv6 controller gets an IPv6 socket. Every open copy of the interface
+ * is told when `heard` changes. A connection whose events request never opens while it asks for the stream stops
+ * asking after two attempts (below). Exported, with seams for the socket and the event stream, for the tests.
+ */
+export function touchStreams(
+  ctx: Pick<MainContext, "log" | "ui">,
+  seams: {
+    /** Makes the touch socket (tests). Default: a `dgram` socket. */
+    readonly createSocket?: TouchStreamOptions["createSocket"];
+    /** Opens the event stream (tests). Default: an `EventStream`. */
+    readonly createEvents?: (options: EventStreamOptions) => EventsHandle;
+  } = {},
+): {
+  readonly open: (options: EventStreamOptions) => EventsHandle;
+  readonly current: () => TouchStream | null;
+  readonly info: () => TouchStreamInfo;
+  readonly close: () => void;
+} {
+  const { log, ui } = ctx;
+  let current: TouchStream | null = null;
+  let told = false;
+  const info = (): TouchStreamInfo => ({ heard: current !== null && current.lastPacketAt !== null });
+  const tell = () => {
+    const now = info();
+    if (now.heard === told) return;
+    told = now.heard;
+    try {
+      ui.post("touchStream", now);
+    } catch (error) {
+      log.warn("Couldn't tell the interface (touchStream)", error);
+    }
+  };
+  const close = () => {
+    const stream = current;
+    current = null;
+    stream?.close();
+    tell();
+  };
+  const open = (options: EventStreamOptions): EventsHandle => {
+    close();
+    const address = options.host.startsWith("[") ? options.host.slice(1, -1) : options.host;
+    const family = isIP(address);
+    const stream: TouchStream = new TouchStream({
+      createSocket: seams.createSocket,
+      type: family === 6 ? "udp6" : "udp4",
+      source: family === 0 ? undefined : address,
+      log: (message, error) => log.warn(message, error),
+      onHeard: () => {
+        if (current === stream) tell();
+      },
+    });
+    current = stream;
+    let events: EventsHandle | null = null;
+    let closed = false;
+    // Whether a controller accepts `TouchEventsPort` is unverified: one that refused it would leave the wall without
+    // any events. So until a request carrying it has opened once on this connection, two failed attempts are enough
+    // to stop asking: the rest of this connection goes without it, and without the touch stream. Once one has opened,
+    // a later drop is the network's, and the header stays.
+    let asked = 0;
+    let accepted = false;
+    let givenUp = false;
+    const touchEventsPort = (): number | null => {
+      if (givenUp || stream.port === null) return null;
+      if (!accepted && asked >= TOUCH_HEADER_ATTEMPTS) {
+        givenUp = true;
+        log.warn(
+          "The controller's event stream didn't open while the plugin asked it for touch data, so it stops asking " +
+            "until the controller connects again. Swipes on a wall split into zones won't act meanwhile.",
+        );
+        if (current === stream) close();
+        else stream.close();
+        return null;
+      }
+      asked++;
+      return stream.port;
+    };
+    void stream.bound.then(() => {
+      if (closed) return;
+      const withTouch: EventStreamOptions = {
+        ...options,
+        touchEventsPort,
+        onStatus: (open, error) => {
+          if (open && !givenUp && stream.port !== null) accepted = true;
+          options.onStatus?.(open, error);
+        },
+      };
+      events = seams.createEvents ? seams.createEvents(withTouch) : new EventStream(withTouch);
+    });
+    return {
+      close: () => {
+        closed = true;
+        events?.close();
+        if (current === stream) close();
+        else stream.close();
+      },
+    };
+  };
+  return { open, current: () => current, info, close };
+}
+
+/**
+ * Where a touch's gesture acts: the zone (shared/gestures.ts `touchZone`), read when the gesture is acted on, or null
+ * for none. A tap or double tap acts in the zone of the panel touched. A swipe names no
+ * panel, so the touch stream places it (`placeSwipe`, while there is a stream, heard or not, since its packets may
+ * arrive just after the event). Placing uses up the swipe's touch data. On a split wall it is done by the target,
+ * which the gesture handler calls only for a gesture it doesn't drop as busy, so a dropped swipe leaves the data to
+ * the swipe being worked on. On a wall that isn't split every touch acts in its one zone, so a swipe there never waits
+ * for the stream: it is placed now, only to use its data up. Exported for the tests.
+ */
+export function gestureTarget(
+  touch: Touch,
+  director: Pick<Director, "zones">,
+  stream: Pick<TouchStream, "placeSwipe"> | null,
+): GestureTarget {
+  if (!touch.gesture.startsWith("swipe")) return () => touchZone(director.zones, touch.panelId) ?? null;
+  const zones = director.zones;
+  const panels = zones.flatMap((zone) => zone.panels);
+  if (!isSplit(zones) || stream === null) {
+    void stream?.placeSwipe(panels);
+    return () => touchZone(director.zones, null) ?? null;
+  }
+  return async () => touchZone(director.zones, await stream.placeSwipe(panels)) ?? null;
+}
+
 /**
  * Who the wall follows, worked out each time from the stored choice and the members now; never written back. A Drift
- * Beacon that sends no members gives nobody. Exported for the tests.
+ * Beacon that sends no members gives nobody. On a split wall it is the first zone's member; a gesture is for the
+ * zone it acts in instead. Exported for the tests.
  */
 export function followingOf(ctx: Pick<MainContext, "storage" | "members">): () => readonly string[] {
   return () => actingFor(readZones(ctx.storage.get(STORAGE_KEYS.zones))[0]?.member, ctx.members ?? []);
@@ -184,8 +341,10 @@ export function followingOf(ctx: Pick<MainContext, "storage" | "members">): () =
 /**
  * What makes the wall think again: a data change, a schedule firing, and a storage write. A schedule's snapshot with
  * its pin came first, so the wall is already on its way to the new scene; only a schedule that speaks to someone the
- * wall follows flashes it (one that tells everyone lists every member). A new controller reloads the connection; the
- * settings, the order, the layout and who the wall follows re-decide the scene. Exported for the tests.
+ * wall follows flashes it (one that tells everyone lists every member), and only in the zones whose member it speaks
+ * to (the Director picks them from `members`). `following` is everyone the wall's zones follow. A new controller
+ * reloads the connection; the settings, the order, the layout and the zones re-decide the scene. Exported for the
+ * tests.
  */
 export function listen(
   ctx: Pick<MainContext, "onDataChange" | "schedules" | "storage">,
@@ -195,7 +354,8 @@ export function listen(
 ): void {
   ctx.onDataChange(() => director.update());
   ctx.schedules.onTriggered((trigger) => {
-    if (speaksTo(trigger.members ?? [], following())) director.alert(trigger.activityId);
+    const members = trigger.members ?? [];
+    if (speaksTo(members, following())) director.alert(trigger.activityId, members);
   });
   ctx.storage.onChange((key) => {
     if (key === STORAGE_KEYS.controller) on.controller();
@@ -230,6 +390,7 @@ function registerRequests(
   director: Director,
   find: Find,
   numbering: Set<string>,
+  touchStream: () => TouchStreamInfo,
 ): void {
   const { ui, log } = ctx;
   /**
@@ -304,6 +465,10 @@ function registerRequests(
 
   // Main's clock, so the interface can draw a controller's effect at the point the wall has reached.
   ui.handle("clock", () => ({ now: Date.now() }));
+
+  // Whether the touch stream has been heard since this controller connected (the `touchStream` message says when
+  // that changes): on a split wall a swipe acts only when the stream places it.
+  ui.handle("touchStream", () => touchStream());
 }
 
 /**

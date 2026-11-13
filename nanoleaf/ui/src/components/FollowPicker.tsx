@@ -1,24 +1,33 @@
 import { cn } from "@heroui/theme";
-import { Check } from "lucide-react";
+import { Check, Split } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import { type KeyboardEvent, useId, useRef, useState } from "react";
 import { choiceAfterPress } from "../../../shared/acting-for.ts";
+import { freeMembers } from "../../../shared/storage.ts";
+import { zoneErrorText } from "../lib/zone-actions.ts";
+import { showsZones, wallZones } from "../lib/zones.ts";
 import { rovingStep } from "../lib/roving.ts";
 import { followingOf, useModel } from "../model.ts";
 import { SPRING_POP } from "../motion.ts";
+import { AddZone } from "./zones/WhoseZone.tsx";
+import { useZoneEditing } from "./zones/ZoneContext.ts";
+import { ZONE_WORDS } from "./zones/words.ts";
 
 /**
  * Who the wall follows: one chip per member, a single choice (a radio group; arrows, Home and End move it). The chip checked is
  * who it acts for now (with nothing chosen, or the one chosen gone, the owner); only picking someone else writes, so
- * that fallback is never stored. Hidden in a workspace of one, where everything is for its only member, and with no
- * roster.
+ * that fallback is never stored. Under it, "Split the wall" asks whose the new zone is, adds it and opens choosing
+ * panels for it (only beside a drawing to choose them on). Hidden in a workspace of one, where everything is for its
+ * only member, and with no roster; on a split wall the zone cards take its place.
  */
 export function FollowPicker() {
   const model = useModel();
+  const editing = useZoneEditing();
   const id = useId();
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
   const [saveError, setSaveError] = useState<string | null>(null);
   if (model.members.length < 2) return null;
+  if (editing ? editing.split : showsZones(wallZones(model))) return null;
   const following = followingOf(model);
   const members = model.members;
 
@@ -26,9 +35,16 @@ export function FollowPicker() {
     const next = choiceAfterPress(following, memberId);
     if (next === null) return;
     setSaveError(null);
-    model.actions.saveZoneMember(next).catch((error: unknown) => {
-      setSaveError(`Couldn't save that: ${error instanceof Error ? error.message : String(error)}`);
-    });
+    model.actions.saveZoneMember(next).catch((error: unknown) => setSaveError(zoneErrorText(error)));
+  };
+  const split = (member: string) => {
+    setSaveError(null);
+    model.actions.addZone(member).then(
+      (zone) => {
+        if (zone) editing?.choose(zone);
+      },
+      (error: unknown) => setSaveError(zoneErrorText(error)),
+    );
   };
 
   const onKeyDown = (e: KeyboardEvent, index: number) => {
@@ -100,6 +116,17 @@ export function FollowPicker() {
           );
         })}
       </div>
+      {editing && (
+        // Outside the radio group: it adds a zone, it isn't a choice of whom to follow.
+        <AddZone
+          free={freeMembers(model.zones, model.members)}
+          onAdd={split}
+          label={ZONE_WORDS.split}
+          marker="split-wall"
+          icon={<Split className="h-4 w-4" aria-hidden />}
+          className="mt-3"
+        />
+      )}
       {saveError && (
         <div role="status" className="mt-2 text-danger text-xs">
           {saveError}

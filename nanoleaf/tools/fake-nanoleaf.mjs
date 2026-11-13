@@ -2,8 +2,8 @@
 /**
  * A Nanoleaf Shapes controller on this machine, close enough to develop and demo the plugin without hardware
  * (DESIGN.md "Emulator", nanoleaf-api.md): the REST API with pairing and token checks, SSE events 1–4, extControl v2
- * frames over UDP, static and custom animData, optional SSDP answers, and a virtual wall page. It has no dependencies:
- * it imports shared/*.ts through Node's type stripping.
+ * frames over UDP, the UDP touch stream, static and custom animData, optional SSDP answers, and a virtual wall page.
+ * It has no dependencies: it imports shared/*.ts through Node's type stripping.
  *
  *   node tools/fake-nanoleaf.mjs [--layout mixed|triangles|hexagons|minis|big|<info.json>] [--port 16021]
  *     [--wall 16022|none] [--udp 60222] [--host 127.0.0.1] [--pairing button|open] [--ssdp] [--quiet]
@@ -29,6 +29,7 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { layoutFromPanelLayout, placeLayout, shapeLabel } from "../shared/geometry.ts";
 import { decodeExtControlV2, parseAnimData } from "../shared/protocol.ts";
+import { encodeTouchPacket, TOUCH_DOWN, TOUCH_SWIPE, TOUCH_UP } from "../shared/touch.ts";
 
 /** Layout names and the fixture (a real or synthesised `GET /` answer) each one loads. */
 export const LAYOUTS = Object.freeze({
@@ -67,6 +68,8 @@ const TOKEN_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123
 const SSDP_GROUP = "239.255.255.250";
 const SSE_HEADERS = { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" };
 const STATE_KEYS = ["on", "brightness", "hue", "sat", "ct"];
+/** The strength the touch stream reports (fits both readings of byte 2). */
+const TOUCH_STRENGTH = 4;
 /** SSE state event attributes, in id order. */
 const STATE_ATTRS = [
   [1, "on"],
@@ -113,6 +116,23 @@ const PALETTES = [
  * @property {boolean} [brightnessTurnsOn] A brightness value without `on` turns the wall on. Default true.
  * @property {boolean} [writesTurnOn] A `display` write turns the wall on. Default false.
  * @property {FaultSpec} [faults] Failures to inject from the start, as `emu.faults(spec)` would.
+ * @property {"table" | "text"} [touchLayout] How touch stream packets pack type and strength into byte 2 (the doc's
+ *   two readings, nanoleaf-api.md §6). Default "text", as a Shapes wall sends it.
+ * @property {number} [touchFill] The from-id of a touch stream record that isn't a swipe: 0xFFFF or 0x00FF (§6).
+ *   Default 0xFFFF.
+ */
+
+/**
+ * What a simulated touch sends on the UDP touch stream, to every events request for touch (id 4) that carried
+ * `TouchEventsPort`. Taps always send a down then an up for their panel (twice for a double tap). A swipe sends
+ * nothing unless `panels` says which panels it crossed, as a controller without the stream would: then a down on
+ * the first, a swipe record on each later one whose from-id is the first, and an up on the last, all before the SSE
+ * swipe event.
+ *
+ * @typedef {object} TouchOptions
+ * @property {number[]} [panels] The panels a swipe crossed, in order. Ignored for taps.
+ * @property {"table" | "text"} [layout] Overrides the emulator's `touchLayout` for this touch.
+ * @property {number} [fill] Overrides the emulator's `touchFill` for this touch.
  */
 
 /**
@@ -183,7 +203,9 @@ const PALETTES = [
  * @property {() => boolean} pressPower Toggles power; returns the new state.
  * @property {(name?: string) => string} selectEffect Like the Nanoleaf app; no name picks one at random.
  * @property {(next: string | object) => string} setLayout Rearranges the panels (SSE layout event).
- * @property {(panelId?: number, gesture?: number | string) => object} touch SSE touch event.
+ * @property {(panelId?: number, gesture?: number | string, options?: TouchOptions) => object} touch SSE touch event,
+ *   plus UDP touch stream packets to requests that asked for them (see `TouchOptions`).
+ * @property {number} touchPackets Touch stream packets sent.
  * @property {() => void} identify
  * @property {() => object[]} requests The last 500 REST requests: method, path, status, body, reason. A request a fault
  *   dropped or held unanswered shows status 0.
@@ -221,7 +243,10 @@ export async function startEmulator(options = {}) {
     brightnessTurnsOn = true,
     writesTurnOn = false,
     extControl = true,
+    touchLayout = "text",
+    touchFill = 0xffff,
   } = options;
+  if (touchLayout !== "table" && touchLayout !== "text") throw new RangeError(`touchLayout must be "table" or "text"`);
   if (pairing !== "button" && pairing !== "open") throw new RangeError(`pairing must be "button" or "open"`);
   const say = quiet ? () => {} : (options.log ?? defaultLog);
   const { info, name } = resolveLayout(layout);
@@ -229,7 +254,8 @@ export async function startEmulator(options = {}) {
   const behaviour = { brightnessTurnsOn, writesTurnOn, extControl };
   const faults = new Faults();
   if (options.faults) faults.apply(options.faults);
-  const device = new FakeController(info, name, { now, random, say, pairing, faults, ...behaviour });
+  const touch = { touchLayout, touchFill };
+  const device = new FakeController(info, name, { now, random, say, pairing, faults, ...touch, ...behaviour });
   for (const token of options.tokens ?? []) device.tokens.add(String(token));
 
   let rest = null;
@@ -242,6 +268,14 @@ export async function startEmulator(options = {}) {
   try {
     rest = await listen(createServer(restHandler(device, say, faults)), port, host);
     udp = await bindUdp(udpPort, host, (message) => device.receiveFrame(message));
+    const socket = udp;
+    device.sendTouchPacket = (bytes, port, address, done) => {
+      try {
+        socket.send(bytes, port, address, done);
+      } catch (error) {
+        done(error);
+      }
+    };
     if (wallPort !== null) wall = await listen(createServer(wallHandler(device, say)), wallPort, host);
   } catch (error) {
     await release();
@@ -305,7 +339,10 @@ export async function startEmulator(options = {}) {
     pressPower: () => device.pressPower(),
     selectEffect: (effect) => device.selectEffect(effect),
     setLayout: (next) => device.setLayout(next),
-    touch: (panelId, gesture = 0) => device.touch(panelId, gesture),
+    touch: (panelId, gesture = 0, touchOptions) => device.touch(panelId, gesture, touchOptions),
+    get touchPackets() {
+      return device.touchPackets;
+    },
     identify: () => device.identify(),
     requests: () => device.requests.slice(),
     faults: (spec) => {
@@ -349,8 +386,13 @@ class FakeController {
     this.now = options.now;
     this.say = options.say;
     this.tokens = new Set();
-    /** SSE subscribers: { ids: Set<number>, token, res }. */
+    /** SSE subscribers: { ids: Set<number>, token, res, touchTo: { address, port } | null }. */
     this.streams = new Set();
+    /** Sends one touch stream packet; set once the UDP socket is bound. */
+    this.sendTouchPacket = null;
+    this.touchPackets = 0;
+    /** The touch whose stream packets are still being sent; later touches wait for it, so events stay in order. */
+    this.touchChain = null;
     /** onChange callbacks. */
     this.listeners = new Set();
     /** Wall page subscribers (see wallHandler). */
@@ -480,9 +522,10 @@ class FakeController {
 
   /**
    * A touch on the wall: SSE event 4. Swipes (2–5) aren't tied to a panel, so they report panelId -1; a tap without
-   * a panel id lands on a random light panel.
+   * a panel id lands on a random light panel. Requests that asked for the UDP touch stream get its packets first
+   * (`TouchOptions`); the SSE event then follows once they are sent, and later touches queue behind it.
    */
-  touch(panelId, gesture = 0) {
+  touch(panelId, gesture = 0, options = {}) {
     const g = typeof gesture === "string" ? GESTURES.indexOf(gesture) : gesture;
     if (!Number.isInteger(g) || g < 0 || g >= GESTURES.length) throw new RangeError(`Unknown gesture ${gesture}`);
     const panels = this.placed.panels;
@@ -490,10 +533,83 @@ class FakeController {
       ? panelId
       : (panels[Math.floor(this.options.random() * panels.length) % Math.max(panels.length, 1)]?.id ?? -1);
     const entry = { gesture: g, panelId: g >= 2 ? -1 : id };
-    this.#emit(4, [entry]);
-    this.say(`Touch: ${GESTURES[g]}${entry.panelId >= 0 ? ` on ${entry.panelId}` : ""}`);
-    this.#notify({ kind: "touch", ...entry });
+    const packets = this.#touchPackets(g, id, options ?? {});
+    const finish = () => {
+      this.#emit(4, [entry]);
+      this.say(`Touch: ${GESTURES[g]}${entry.panelId >= 0 ? ` on ${entry.panelId}` : ""}`);
+      this.#notify({ kind: "touch", ...entry });
+    };
+    if (this.touchChain === null && (packets.length === 0 || this.#touchTargets().length === 0)) {
+      finish();
+      return entry;
+    }
+    const chain = (this.touchChain ?? Promise.resolve())
+      .then(() => this.#sendTouch(packets))
+      .then(finish)
+      .catch((error) => this.say(`Touch failed: ${error?.message ?? error}`));
+    this.touchChain = chain;
+    void chain.then(() => {
+      if (this.touchChain === chain) this.touchChain = null;
+    });
     return entry;
+  }
+
+  /** The touch stream packets for one touch, in order (empty when it sends none). */
+  #touchPackets(gesture, panelId, options) {
+    const encode = (records) =>
+      encodeTouchPacket(records, {
+        layout: options.layout ?? this.options.touchLayout,
+        fill: options.fill ?? this.options.touchFill,
+      });
+    const record = (panel, type, fromId) => ({ panelId: panel, type, strength: TOUCH_STRENGTH, fromId });
+    if (gesture <= 1) {
+      if (!Number.isInteger(panelId) || panelId < 0 || panelId > 0xffff) return [];
+      const tap = [encode([record(panelId, TOUCH_DOWN)]), encode([record(panelId, TOUCH_UP)])];
+      return gesture === 1 ? [...tap, ...tap] : tap;
+    }
+    const crossed = options.panels ?? [];
+    if (!Array.isArray(crossed)) throw new RangeError("panels must be an array of panel ids");
+    for (const panel of crossed) {
+      if (!Number.isInteger(panel) || panel < 0 || panel > 0xffff) throw new RangeError(`Bad panel id ${panel}`);
+    }
+    if (crossed.length === 0) return [];
+    const [first] = crossed;
+    const packets = [encode([record(first, TOUCH_DOWN)])];
+    for (const panel of crossed.slice(1)) packets.push(encode([record(panel, TOUCH_SWIPE, first)]));
+    packets.push(encode([record(crossed.at(-1), TOUCH_UP)]));
+    return packets;
+  }
+
+  /** Where touch stream packets go: each open touch request that carried `TouchEventsPort`. */
+  #touchTargets() {
+    const targets = [];
+    for (const stream of this.streams) if (stream.touchTo) targets.push(stream.touchTo);
+    return targets;
+  }
+
+  /**
+   * Sends each packet, in order, to the requests that want the stream at the moment it goes out (one that closed
+   * meanwhile gets nothing, one that opened meanwhile is included); resolves once every send has finished. Failures
+   * are logged.
+   */
+  async #sendTouch(packets) {
+    for (const bytes of packets) {
+      const send = this.sendTouchPacket;
+      if (!send) return;
+      const targets = this.#touchTargets();
+      await Promise.all(
+        targets.map(
+          ({ address, port }) =>
+            new Promise((done) =>
+              send(bytes, port, address, (error) => {
+                if (error) this.say(`Touch stream to ${address}:${port} failed (${error.code ?? error.message})`);
+                else this.touchPackets++;
+                done();
+              }),
+            ),
+        ),
+      );
+    }
   }
 
   /** `PUT /identify`: flashes the whole wall. */
@@ -642,6 +758,7 @@ class FakeController {
   /** Stops timers and ends every stream (close()). */
   dispose() {
     this.#cancelTemp();
+    this.sendTouchPacket = null;
     for (const stream of this.streams) stream.res.end();
     for (const viewer of this.viewers) viewer.res.end();
     this.streams.clear();
@@ -1464,14 +1581,31 @@ function openEvents(device, say, req, res, token, query) {
   res.writeHead(200, SSE_HEADERS);
   res.flushHeaders();
   req.socket.setNoDelay(true);
-  const stream = { ids, token, res };
+  const touchTo = ids.has(4) ? touchStreamTarget(req) : null;
+  const stream = { ids, token, res, touchTo };
   device.streams.add(stream);
-  say(`GET /events?id=${[...ids].join(",")} → 200, streaming (${device.streams.size} open)`);
+  const touchNote = touchTo ? `, touch stream to ${touchTo.address}:${touchTo.port}` : "";
+  say(`GET /events?id=${[...ids].join(",")} → 200, streaming (${device.streams.size} open${touchNote})`);
   res.on("close", () => {
     if (!device.streams.delete(stream)) return;
     say(`Event stream closed (${device.streams.size} open)`);
   });
   return null;
+}
+
+/**
+ * Where a request's `TouchEventsPort` header asks for the UDP touch stream: the requester's address on that port, or
+ * null without a valid header.
+ */
+function touchStreamTarget(req) {
+  const header = req.headers["toucheventsport"];
+  const text = Array.isArray(header) ? header[0] : header;
+  if (typeof text !== "string" || !/^\d{1,5}$/.test(text.trim())) return null;
+  const port = Number(text.trim());
+  const remote = req.socket.remoteAddress;
+  if (port < 1 || port > 0xffff || !remote) return null;
+  const address = remote.toLowerCase().startsWith("::ffff:") && remote.includes(".") ? remote.slice(7) : remote;
+  return { address, port };
 }
 
 function respond(res, { status, body, reason }) {

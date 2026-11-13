@@ -2,8 +2,9 @@ import { PluginError } from "@drift-beacon/plugin/ui";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DEFAULT_PERIOD_MS, REVEAL_MS } from "../../../shared/effects.ts";
 import { addressKind, lanProblem } from "../../../shared/lan.ts";
-import { decideScene } from "../../../shared/scene.ts";
-import { DEFAULT_ORDER, DEFAULT_SETTINGS, readSettings, zonesFollowing } from "../../../shared/storage.ts";
+import { type GestureStep, resolveGesture, touchZone } from "../../../shared/gestures.ts";
+import { outputScene, wallSceneKey } from "../../../shared/scene.ts";
+import { DEFAULT_ORDER, DEFAULT_SETTINGS, readSettings } from "../../../shared/storage.ts";
 import type {
   ConnectionInfo,
   ConnectionStatus,
@@ -19,13 +20,9 @@ import type {
   Zone,
 } from "../../../shared/types.ts";
 import { useNow } from "../hooks/useNow.ts";
-import {
-  type ControllerChange,
-  followingOf,
-  type MainStatus,
-  type NanoleafModel,
-  type PreviewRequest,
-} from "../model.ts";
+import { createZoneActions } from "../lib/zone-actions.ts";
+import { drawnScenes, wallZones, zoneScenes } from "../lib/zones.ts";
+import { type ControllerChange, type MainStatus, type NanoleafModel, type PreviewRequest } from "../model.ts";
 import {
   type ActivityFixture,
   activitiesFor,
@@ -37,6 +34,7 @@ import {
   liveSpan,
   ME,
   MEMBERS,
+  SAM,
   nextSessionId,
   PLAIN_ACTIVITY,
   type SimController,
@@ -54,6 +52,10 @@ import {
 
 export type SimAction =
   | { type: "start"; goal: boolean }
+  /** Sam's own session (again to leave it), or one Rich and Sam share (again to end it). */
+  | { type: "member"; readonly who: "sam" | "both" }
+  /** The controller's touch stream is heard (again: silent, as after a reconnect). */
+  | { type: "touch-stream" }
   | { type: "end" }
   | { type: "pin" }
   | { type: "archive" }
@@ -63,6 +65,7 @@ export type SimAction =
   | { type: "unauthorized" }
   | { type: "takeover" }
   | { type: "control" }
+  /** A touch on a random panel, acting in that panel's zone as main would (a swipe is placed only when heard). */
   | { type: "tap"; readonly gesture?: TouchGesture }
   | { type: "busy" }
   | { type: "main" }
@@ -84,6 +87,9 @@ export interface SimReadout {
   readonly fraction: number | null;
   readonly speed: number;
   readonly connection: ConnectionStatus;
+  /** Zones that stand, and whether the touch stream is heard. */
+  readonly zones: number;
+  readonly touchStream: boolean;
 }
 
 /** Follow the simulated world, for the SimPanel readout. */
@@ -115,6 +121,8 @@ interface SimState {
   readonly controller: SimController | null;
   readonly layout: Layout | null;
   readonly connection: ConnectionInfo;
+  /** Main has heard the controller's touch stream (it places swipes in zones). */
+  readonly touchStream: boolean;
   /** The scene key the wall was taken from us during (someone picked an effect in the Nanoleaf app). */
   readonly yieldedKey: string | null;
   readonly busy: boolean;
@@ -162,6 +170,7 @@ function initialState(layoutKey: LayoutKey | null, options: SimOptions, now: num
     sessions: sessionsFor(options.start, now),
     settings: DEFAULT_SETTINGS,
     zones: [],
+    touchStream: false,
     oneMember: false,
     order: DEFAULT_ORDER,
     controller,
@@ -219,7 +228,7 @@ function nextControl(control: ControlLease | null, now: number): ControlLease | 
 const mainRuns = (status: MainStatus) => status === "running" || status === "connecting";
 
 /** What main would publish as `output`, without `since`; null while main isn't running or the page hasn't heard. */
-function outputOf(s: SimState, scene: Scene, now: number): Omit<OutputInfo, "since"> | null {
+function outputOf(s: SimState, scene: Scene, wallKey: string, now: number): Omit<OutputInfo, "since"> | null {
   if (s.mainStatus !== "running") return null;
   const quiet = { activityId: null, fraction: null, inControl: false, detail: null };
   if (!s.controller || s.connection.status !== "connected") return { ...quiet, mode: "disconnected" };
@@ -231,7 +240,7 @@ function outputOf(s: SimState, scene: Scene, now: number): Omit<OutputInfo, "sin
     const activityId = lease.preview.activityId ?? scene.activityId;
     return { mode: "preview", activityId, fraction, inControl: true, detail: "Showing a preview from this page" };
   }
-  if (s.yieldedKey !== null && s.yieldedKey === scene.key) {
+  if (s.yieldedKey !== null && s.yieldedKey === wallKey) {
     return { ...quiet, mode: "yielded", activityId: scene.activityId, fraction, detail: "Changed in the Nanoleaf app" };
   }
   if (scene.kind === "off") {
@@ -280,6 +289,7 @@ export function useSimModel(layoutKey: LayoutKey | null, options: SimOptions): N
   const timers = useRef<number[]>([]);
   const listeners = useRef(new Set<(panelId: number, gesture: TouchGesture) => void>());
   const changeListeners = useRef(new Set<(change: ControllerChange) => void>());
+  const zoneListeners = useRef(new Set<(gesture: TouchGesture, zoneId: string | null) => void>());
   const resyncListeners = useRef(new Set<() => void>());
   const pairAttempts = useRef(new Map<string, number>());
   const retries = useRef(0);
@@ -321,21 +331,33 @@ export function useSimModel(layoutKey: LayoutKey | null, options: SimOptions): N
     [state.activities, state.sessions, state.oldApp],
   );
   const members = useMemo(() => (state.oneMember ? MEMBERS.slice(0, 1) : MEMBERS), [state.oneMember]);
-  const following = useMemo(() => followingOf({ members, zones: state.zones }), [members, state.zones]);
-  const scene = useMemo(
-    () =>
-      decideScene({
-        activities,
-        sessions: state.sessions,
-        following,
-        settings: state.settings,
-        now: new Date(now),
-        control: state.control,
-      }),
-    [activities, state.sessions, following, state.settings, now, state.control],
+  // Each zone's scene as main decides it; the wall's yield key and published output follow them all.
+  const zones = useMemo(
+    () => wallZones({ zones: state.zones, members, order: state.order, layout: state.layout }),
+    [state.zones, members, state.order, state.layout],
   );
+  const scenes = useMemo(
+    () =>
+      zoneScenes(
+        { activities, sessions: state.sessions, settings: state.settings, control: state.control },
+        zones,
+        now,
+      ),
+    [activities, state.sessions, state.settings, state.control, zones, now],
+  );
+  // The wall as a whole is its drawn zones' (a zone with no panels yet shows nothing), as main takes it.
+  const drawn = useMemo(() => drawnScenes(zones, scenes), [zones, scenes]);
+  const scene = useMemo(() => outputScene(drawn, state.sessions), [drawn, state.sessions]);
+  const wallKey = wallSceneKey(drawn);
   const sceneRef = useRef(scene);
   sceneRef.current = scene;
+  const wallKeyRef = useRef(wallKey);
+  wallKeyRef.current = wallKey;
+  const latest = useRef({ zones, activities, members });
+  latest.current = { zones, activities, members };
+  // Storage `zones`, kept in step with each write at once: a drag's edits land faster than renders.
+  const zonesRef = useRef<readonly Zone[]>(state.zones);
+  const numbering = useRef(false);
 
   // A reveal ends its own hold once it has played, as main's lease does.
   useEffect(() => {
@@ -348,10 +370,10 @@ export function useSimModel(layoutKey: LayoutKey | null, options: SimOptions): N
     return () => window.clearTimeout(id);
   }, [state.control, update]);
 
-  // Yielding lasts until something different should show.
+  // Yielding lasts until something different should show, in any zone.
   useEffect(() => {
-    if (state.yieldedKey !== null && state.yieldedKey !== scene.key) update((s) => ({ ...s, yieldedKey: null }));
-  }, [scene.key, state.yieldedKey, update]);
+    if (state.yieldedKey !== null && state.yieldedKey !== wallKey) update((s) => ({ ...s, yieldedKey: null }));
+  }, [wallKey, state.yieldedKey, update]);
 
   // The simulated clock: running faster than real time moves every session into the past.
   useEffect(() => {
@@ -400,12 +422,12 @@ export function useSimModel(layoutKey: LayoutKey | null, options: SimOptions): N
   // Published output, with `since` kept while nothing but time changes.
   const lastOutput = useRef<{ value: Omit<OutputInfo, "since"> | null; since: string } | null>(null);
   const output = useMemo<OutputInfo | null>(() => {
-    const value = outputOf(state, scene, now);
+    const value = outputOf(state, scene, wallKey, now);
     if (!lastOutput.current || !sameOutput(lastOutput.current.value, value)) {
       lastOutput.current = { value, since: new Date().toISOString() };
     }
     return value ? { ...value, since: lastOutput.current.since } : null;
-  }, [state, scene, now]);
+  }, [state, scene, wallKey, now]);
   const stableOutput = useStable(output, (a, b) => a === b || (!!a && !!b && sameOutput(a, b) && a.since === b.since));
 
   useEffect(() => {
@@ -421,9 +443,20 @@ export function useSimModel(layoutKey: LayoutKey | null, options: SimOptions): N
       fraction: scene.progress?.fraction ?? null,
       speed: state.speed,
       connection: state.connection.status,
+      zones: zones.length,
+      touchStream: state.touchStream,
     };
     window.dispatchEvent(new CustomEvent<SimReadout>(STATE_EVENT, { detail: readout }));
-  }, [stableOutput, scene, activities, state.speed, state.mainStatus, state.connection.status]);
+  }, [
+    stableOutput,
+    scene,
+    activities,
+    state.speed,
+    state.mainStatus,
+    state.connection.status,
+    zones.length,
+    state.touchStream,
+  ]);
 
   const requireMain = useCallback(() => {
     if (!mainRuns(ref.current.mainStatus)) {
@@ -448,9 +481,15 @@ export function useSimModel(layoutKey: LayoutKey | null, options: SimOptions): N
       async saveOrder(order) {
         update((s) => ({ ...s, order }));
       },
-      async saveZoneMember(member) {
-        update((s) => ({ ...s, zones: zonesFollowing(s.zones, member) }));
-      },
+      // The same edits as the live model, over the sim's storage.
+      ...createZoneActions({
+        read: () => zonesRef.current,
+        async write(zones) {
+          zonesRef.current = zones;
+          update((s) => ({ ...s, zones }));
+        },
+        members: () => latest.current.members,
+      }),
       async discover(_timeoutMs, signal) {
         requireMain();
         await wait(1200, signal);
@@ -526,7 +565,9 @@ export function useSimModel(layoutKey: LayoutKey | null, options: SimOptions): N
         requireMain();
         update((s) => ({ ...s, override: { value: Math.round(value), until: Date.now() + 3000 } }));
       },
-      async numbering() {},
+      async numbering(on) {
+        numbering.current = on;
+      },
     }),
     [requireMain, update, wait, changed],
   );
@@ -535,6 +576,12 @@ export function useSimModel(layoutKey: LayoutKey | null, options: SimOptions): N
     listeners.current.add(listener);
     return () => {
       listeners.current.delete(listener);
+    };
+  }, []);
+  const onGestureZone = useCallback((listener: (gesture: TouchGesture, zoneId: string | null) => void) => {
+    zoneListeners.current.add(listener);
+    return () => {
+      zoneListeners.current.delete(listener);
     };
   }, []);
   const onControllerChanged = useCallback((listener: (change: ControllerChange) => void) => {
@@ -558,9 +605,24 @@ export function useSimModel(layoutKey: LayoutKey | null, options: SimOptions): N
       switch (action.type) {
         case "start": {
           const activityId = action.goal ? GOAL_ACTIVITY : PLAIN_ACTIVITY;
-          update((x) => ({ ...x, sessions: sortSessions([...endLive(x.sessions, t), liveSpan(activityId, t, 0)]) }));
+          update((x) => ({ ...x, sessions: startFor(x.sessions, activityId, [ME], t) }));
           break;
         }
+        case "member": {
+          const who = action.who === "sam" ? [SAM] : [ME, SAM];
+          update((x) => {
+            const joint = x.sessions.find(
+              (y) => y.status === "live" && y.type === "span" && who.every((id) => y.currentMemberIds.includes(id)),
+            );
+            // Again: Sam leaves theirs, and the shared one ends.
+            if (joint) return { ...x, sessions: sortSessions(leave(x.sessions, who, t)) };
+            return { ...x, sessions: startFor(x.sessions, action.who === "sam" ? "guitar" : "gym", who, t) };
+          });
+          break;
+        }
+        case "touch-stream":
+          update((x) => ({ ...x, touchStream: !x.touchStream }));
+          break;
         case "end":
           update((x) => ({ ...x, sessions: sortSessions(endLive(x.sessions, t)) }));
           break;
@@ -613,7 +675,7 @@ export function useSimModel(layoutKey: LayoutKey | null, options: SimOptions): N
           );
           break;
         case "takeover":
-          if (sceneRef.current.kind !== "off") update((x) => ({ ...x, yieldedKey: sceneRef.current.key }));
+          if (!/^(off\|?)+$/.test(wallKeyRef.current)) update((x) => ({ ...x, yieldedKey: wallKeyRef.current }));
           break;
         case "control":
           // On the drawing's clock (real time), whatever the simulated one does.
@@ -622,10 +684,23 @@ export function useSimModel(layoutKey: LayoutKey | null, options: SimOptions): N
         case "tap": {
           const ids = lightPanelIds(s.layout);
           if (!ids.length || s.connection.status !== "connected") break;
-          // A swipe is the whole wall's, so it names no panel (-1), as the controller reports it.
+          // A swipe names no panel (-1), as the controller reports it; main places it from the touch stream when it
+          // has heard it.
           const gesture = action.gesture ?? "tap";
-          const id = gesture.startsWith("swipe") ? -1 : ids[Math.floor(Math.random() * ids.length)];
-          for (const listener of listeners.current) listener(id, gesture);
+          const id = ids[Math.floor(Math.random() * ids.length)] as number;
+          const swipe = gesture.startsWith("swipe");
+          for (const listener of listeners.current) listener(swipe ? -1 : id, gesture);
+          // Main acts in the zone touched: a swipe in the zone it started in when the stream placed it, nowhere on a
+          // split wall when it couldn't, and as it always has on an unsplit wall.
+          const { zones: standing, activities: rows } = latest.current;
+          if (!s.settings.gestures || numbering.current) break;
+          const placed = swipe ? (s.touchStream ? id : null) : id;
+          const zone = touchZone(standing, placed);
+          // As main tells every copy where it acted (null: nowhere), before what it did reaches the model.
+          for (const listener of [...zoneListeners.current]) listener(gesture, zone?.id ?? null);
+          if (!zone) break;
+          const step = resolveGesture(s.settings.gestureActions[gesture], rows, s.sessions, zone.following);
+          if (step) update((x) => applyStep(x, step, t));
           break;
         }
         case "busy":
@@ -690,6 +765,7 @@ export function useSimModel(layoutKey: LayoutKey | null, options: SimOptions): N
       settings: state.settings,
       members,
       zones: state.zones,
+      touchStreamHeard: running && state.touchStream,
       order: state.order,
       layout: state.layout,
       controller,
@@ -702,6 +778,7 @@ export function useSimModel(layoutKey: LayoutKey | null, options: SimOptions): N
       supportsGoals: !state.oldApp,
       actions,
       onTouch,
+      onGestureZone,
       onControllerChanged,
       onResync,
     }),
@@ -715,6 +792,7 @@ export function useSimModel(layoutKey: LayoutKey | null, options: SimOptions): N
       stableOutput,
       actions,
       onTouch,
+      onGestureZone,
       onControllerChanged,
       onResync,
     ],
@@ -733,6 +811,45 @@ function unreachable(controller: SimController, retryInS: number): ConnectionInf
     error: `No answer from ${controller.host}:${controller.port}`,
     retryAt: new Date(Date.now() + retryInS * 1000).toISOString(),
   });
+}
+
+/**
+ * A live span of `activityId` for `members`, started now: as Drift Beacon does, it moves them out of the spans they
+ * were in, and a span nobody is left in ends.
+ */
+function startFor(sessions: readonly SessionLike[], activityId: string, members: readonly string[], now: number) {
+  return sortSessions([...leave(sessions, members, now), liveSpan(activityId, now, 0, members)]);
+}
+
+/** `members` leave the live spans they are in; a span nobody is left in ends now. */
+function leave(sessions: readonly SessionLike[], members: readonly string[], now: number): SessionLike[] {
+  return sessions.map((x) => {
+    if (x.status !== "live" || !x.currentMemberIds.some((id) => members.includes(id))) return x;
+    const current = x.currentMemberIds.filter((id) => !members.includes(id));
+    return current.length > 0
+      ? { ...x, currentMemberIds: current }
+      : { ...x, status: "completed", currentMemberIds: [], endedAt: new Date(now) };
+  });
+}
+
+/** What main does for a gesture's step. The sim has no paused sessions: a pause ends the session, as a stop does. */
+function applyStep(s: SimState, step: GestureStep, now: number): SimState {
+  switch (step.kind) {
+    case "pause":
+    case "stop":
+      return {
+        ...s,
+        sessions: s.sessions.map((x) =>
+          x.id === step.sessionId ? { ...x, status: "completed", currentMemberIds: [], endedAt: new Date(now) } : x,
+        ),
+      };
+    case "track":
+      return step.members.length > 0 ? { ...s, sessions: startFor(s.sessions, step.activityId, step.members, now) } : s;
+    case "pin":
+      return { ...s, activities: s.activities.map((a) => (a.archived ? a : { ...a, pinned: a.id === step.activityId })) };
+    case "unpin":
+      return { ...s, activities: s.activities.map((a) => (a.id === step.activityId ? { ...a, pinned: false } : a)) };
+  }
 }
 
 /** The workspace's live spans, ended now. */
